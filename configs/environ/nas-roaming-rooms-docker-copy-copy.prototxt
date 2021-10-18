@@ -1,4 +1,4 @@
-data_folder: "./data/roaming-rooms/h5_data"
+data_folder: "/home/samenabar/datasets/RoamingRooms/downloaded/RoamingRooms"
 dataset: "roaming-rooms"
 results: "./results/oc-fewshot"
 checkpoint: "./checkpoint/"

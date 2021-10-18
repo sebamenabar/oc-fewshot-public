@@ -1,0 +1,18 @@
+data_folder: "/home/samenabar/storage/data/FSL/tiered-imagenet/tiered-imagenet"
+dataset: "tiered-imagenet"
+results: "./results/oc-fewshot"
+checkpoint: "./checkpoint/mren"
+train_fs_split: "train"
+val_fs_split: "val"
+test_fs_split: "test"
+image_size: 84
+crop_size: 100
+random_crop: true
+random_flip: true
+random_color: true
+# mean_pix: 0.47214064400000005
+# mean_pix: 0.45330829125490196
+# mean_pix: 0.4099612805098039
+# std_pix: 0.2771838538039216
+# std_pix: 0.26775040952941176
+# std_pix: 0.28449041290196075

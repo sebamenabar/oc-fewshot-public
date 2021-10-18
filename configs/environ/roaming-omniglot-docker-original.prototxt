@@ -1,4 +1,4 @@
-data_folder: "./data/roaming-omniglot/"
+data_folder: "./data/omniglot-vinyals"
 dataset: "omniglot"
 results: "./results/oc-fewshot"
 checkpoint: "./checkpoint/"

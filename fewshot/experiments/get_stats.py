@@ -88,38 +88,59 @@ def get_stats(results,
   return results_dict
 
 
-def log_results(results, prefix, filename=None):
+def log_results(results, prefix, filename=None, nns=None):
   """Log results to a file."""
   if filename is not None:
     fcsv = open(filename, 'a')
     timestamp = time.time()
     dt = datetime.fromtimestamp(timestamp)
     timestr = dt.strftime('%Y/%m/%d %H:%M:%S')
-    fcsv.write(prefix + ' ' + timestr + '\n')
-    fcsv.write('ap,{:.3f}\n'.format(results['ap'] * 100.0))
-    for name in [
-        'acc_nshot', 'acc_nshot_se', 'acc_nshot_labeled',
-        'acc_nshot_labeled_se', 'acc_time', 'acc_time_se', 'acc_time_label',
-        'acc_time_label_se'
-    ]:
-      fcsv.write(prefix + ' ' + name + ',' +
-                 ','.join(['{:.3f}'.format(x * 100.0)
-                           for x in results[name]]) + '\n')
+  if nns is not None:
+    # log.info('{} NNs: {:.3f}'.format(prefix, np.mean(nns) * 100.0))
+    nns = np.array(nns) * 100
+    # print(nns)
+    nns_mean = np.mean(nns)
+    nns_std = np.std(nns)
+  else:
+    nns_mean = 0.
+    nns_std = 0.
+  nshots_str = ";".join([
+        f"{ns:.3f}±{se:.3f}" for ns, se in zip(results["acc_nshot"] * 100, results["acc_nshot_se"] * 100)
+    ])
+  all_str = f"{results['ap'] * 100:.3f};{nshots_str};{nns_mean:.3f}±{nns_std:.3f}"
+  fcsv.write(prefix + ' ' + timestr + '\n')
+  fcsv.write('ap,{:.3f}\n'.format(results['ap'] * 100.0))
+  if nns is not None:
+    fcsv.write('nns,{:.3f}\n'.format(np.mean(nns) * 100.0))
+  fcsv.write(all_str + '\n')
+
+  for name in [
+      'acc_nshot', 'acc_nshot_se', 'acc_nshot_labeled',
+      'acc_nshot_labeled_se', 'acc_time', 'acc_time_se', 'acc_time_label',
+      'acc_time_label_se'
+  ]:
+    fcsv.write(prefix + ' ' + name + ',' +
+                ','.join(['{:.3f}'.format(x * 100.0)
+                          for x in results[name]]) + '\n')
 
     # for name in ['acc_nshot_2d', 'acc_nshot_2d_se']:
     #   for s in range(results[name].shape[1]):
     #     fcsv.write(prefix + ' ' + name + ',' + ','.join(
     #         ['{:.3f}'.format(x * 100.0) for x in results[name][:, s]]) +
     # '\n')
-    fcsv.close()
+  fcsv.close()
+
 
   log.info('{} AP: {:.3f}'.format(prefix, results['ap'] * 100.0))
+  log.info(f"NNs {nns_mean}±{nns_std}")
   for name, name2 in zip(['acc_nshot', 'acc_nshot_labeled'],
                          ['ACC', 'ACC Labeled']):
     for s in range(len(results[name])):
       log.info(u'{} {} {}-Shot: {:.3f} ± {:.3f}'.format(
           prefix, name2, s + 1, results[name][s] * 100.0,
           results[name + '_se'][s] * 100.0))
+
+  log.info(all_str)
 
   # for name, name2 in zip(['acc_nshot_2d'], ['ACC 2D']):
   #   for s in range(results[name].shape[1]):

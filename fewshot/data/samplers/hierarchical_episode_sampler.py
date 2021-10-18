@@ -30,7 +30,8 @@ class HierarchicalEpisodeSampler(EpisodeSampler):
         context environment.
       seed: Int. Random seed.
     """
-    super(HierarchicalEpisodeSampler, self).__init__(seed)
+    # super(HierarchicalEpisodeSampler, self).__init__(seed)
+    super().__init__(seed)
     self._subsampler = subsampler
     self._blender = blender
     self._use_class_hierarchy = use_class_hierarchy
@@ -44,7 +45,8 @@ class HierarchicalEpisodeSampler(EpisodeSampler):
 
   def set_dataset(self, dataset):
     """Hook the sampler with a dataset object."""
-    super(HierarchicalEpisodeSampler, self).set_dataset(dataset)
+    # super(HierarchicalEpisodeSampler, self).set_dataset(dataset)
+    super().set_dataset(dataset)
     if self._use_class_hierarchy:
       self._set_hierarchy_dict(dataset.get_hierarchy_dict())
 
@@ -79,6 +81,9 @@ class HierarchicalEpisodeSampler(EpisodeSampler):
       cls = self.subsampler.sample_episode_classes(
           n_, max_num=max_num_, **kwargs)
       cls_list.append(cls)
+
+      # print("phase", phase, cls_list)
+
     cls_seq, flag = self.blender.blend(
         cls_list, accumulate=not self._use_class_hierarchy)
     if return_flag:

@@ -35,6 +35,7 @@ class SemiSupervisedMinDistGRUProtoMemory(SemiSupervisedMinDistProtoMemory):
                radius_init_write=None,
                use_ssl_beta_gamma_write=True,
                temp_init=10.0,
+               config=None,
                dtype=tf.float32):
     assert unknown_logits == 'radii'
     super(SemiSupervisedMinDistGRUProtoMemory, self).__init__(
@@ -47,7 +48,9 @@ class SemiSupervisedMinDistGRUProtoMemory(SemiSupervisedMinDistProtoMemory):
         similarity=similarity,
         unknown_logits=unknown_logits,
         temp_init=temp_init,
+        config=config,
         dtype=dtype)
+    self._dense_update = config.dense_update 
     self._radius_init = radius_init
     log.info('Radius init {}'.format(radius_init))
     if radius_init_write is not None:
@@ -59,7 +62,7 @@ class SemiSupervisedMinDistGRUProtoMemory(SemiSupervisedMinDistProtoMemory):
 
     with variable_scope(name):
       self._storage = GRU1DMod(
-          "storage", dim, dim, layernorm=False, dtype=dtype)
+          "storage", dim, dim, layernorm=False, bias_init=config.gru_bias_init, dtype=dtype)
 
     if static_beta_gamma:
       with variable_scope(name):
@@ -125,6 +128,8 @@ class SemiSupervisedMinDistGRUProtoMemory(SemiSupervisedMinDistProtoMemory):
       x: Input. [B, ...].
       y: Label. [B].
     """
+    if self._normalize_feature:
+      x = self._normalize(x)
     # assert y_soft is not None, 'Not supported'
     # y_soft = None
     B = tf.shape(y)[0]
@@ -141,15 +146,15 @@ class SemiSupervisedMinDistGRUProtoMemory(SemiSupervisedMinDistProtoMemory):
     inp = tf.scatter_nd(idx, x, [B, K, D])  # [B, K, D]
     inp = inp * inc[:, None, None]  # set last storage dim to zero.
 
-    # # TODO disable mask for y == unk_id
-    # mask = tf.scatter_nd(idx, tf.ones([B, D]), [B, K, D])  # [B, K, D]
-    # mask = tf.reshape(mask, [B * K, D])
-    # mask = mask * tf.reshape(tf.tile(inc[:, None, None], [1, K, 1]), [-1, 1])
-    # tf.print('y soft3', y_soft)
+    # Update mask.
+    mask = tf.scatter_nd(idx, tf.ones([B, D]), [B, K, D])  # [B, K, D]
+    mask = tf.reshape(mask, [B * K, D])
+    mask = mask * tf.reshape(tf.tile(inc[:, None, None], [1, K, 1]), [-1, 1])
 
     if y_soft is not None:
       use_mask = tf.cast(tf.greater(count, 0), y_soft.dtype)  # [B, K]
-      # y_soft = tf.concat([y_soft[:, :-1], tf.zeros([B, 1])], axis=1)  # [B, K]
+      # [B, K]
+      # y_soft = tf.concat([y_soft[:, :-1], tf.zeros([B, 1])], axis=1)
       y_soft_mask = y_soft * use_mask  # [B, K]
       unk_mask = tf.cast(tf.equal(y, self._unknown_id), y_soft.dtype)  # [B]
       unk_mask = tf.reshape(unk_mask, [-1, 1, 1])  # [B, 1, 1]
@@ -169,8 +174,9 @@ class SemiSupervisedMinDistGRUProtoMemory(SemiSupervisedMinDistProtoMemory):
 
     inp = tf.reshape(inp, [B * K, D])
     h_new, _ = self.storage(inp, h_last)  # [BK, D]
-    # Sparse update.
-    # h_new = tf.where(tf.greater(mask, 0.5), h_new, h_last)
+    if not self._dense_update:
+      # Sparse update.
+      h_new = tf.where(tf.greater(mask, 0.5), h_new, h_last)
     h_new = tf.reshape(h_new, [B, K, D])  # [B, K, D]
 
     # TODO maybe consider use f_gate to decay count.

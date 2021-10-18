@@ -25,8 +25,10 @@ class MLP(ContainerModule):
                layernorm=False,
                dtype=tf.float32,
                wdict=None):
-    super(MLP, self).__init__(dtype=dtype)
+    # super(MLP, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     self._layers = []
+    self._layer_size = layer_size
     with variable_scope(name):
       for i in range(len(layer_size) - 1):
         if bias_init is not None and bias_init[i] is not None:
@@ -57,11 +59,22 @@ class MLP(ContainerModule):
           else:
             self._layers.append(act_func[i])
 
-  def forward(self, x):
+  def forward(self, x, return_features=False):
     """Forward pass."""
-    for layer in self._layers:
-      x = layer(x)
-    return x
+    if return_features:
+      in_feats = x
+      out_feats = [in_feats]
+      for layer in self._layers[:-1]:
+        x = layer(x)
+        out_feats.append(x)
+      feats = x
+      x = self._layers[-1](x)
+      out_feats.append(x)
+      return x, feats, in_feats, out_feats
+    else:
+      for layer in self._layers:
+        x = layer(x)
+      return x
 
 
 @RegisterModule('cosine-last-mlp')
@@ -77,8 +90,10 @@ class CosineLastMLP(ContainerModule):
                temp=None,
                learn_temp=False,
                dtype=tf.float32,
+               cosine_bias=False,
                wdict=None):
-    super(CosineLastMLP, self).__init__(dtype=dtype)
+    # super(CosineLastMLP, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     self._layers = []
     with variable_scope(name):
       for i in range(len(layer_size) - 1):
@@ -105,6 +120,7 @@ class CosineLastMLP(ContainerModule):
               layer_size[i + 1],
               temp=temp,
               learn_temp=learn_temp,
+              cosine_bias=cosine_bias,
               dtype=tf.float32,
               wdict=wdict)
         self._layers.append(layer)
@@ -121,8 +137,16 @@ class CosineLastMLP(ContainerModule):
           else:
             self._layers.append(act_func[i])
 
-  def forward(self, x):
+  def forward(self, x, return_features=False):
     """Forward pass."""
-    for layer in self._layers:
-      x = layer(x)
-    return x
+    if return_features:
+      in_feats = x
+      for layer in self._layers[:-1]:
+        x = layer(x)
+      feats = x
+      x = self._layers[-1](x)
+      return x, feats, in_feats
+    else:
+      for layer in self._layers:
+        x = layer(x)
+      return x

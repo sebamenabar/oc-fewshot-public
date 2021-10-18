@@ -111,6 +111,7 @@ class EpisodeSampler(Sampler):
     image_ids = []
     counter = {}
     N = len(self.cls_dict_keys)
+    # print("sample images", classes)
     for c in classes:
       c_ = c % N
       if not allow_repeat:
@@ -119,6 +120,7 @@ class EpisodeSampler(Sampler):
           self.rnd.shuffle(img_map)
           image_map[c] = img_map
           counter[c] = 0
+
         image_ids.append(self.cls_dict[c_][image_map[c][counter[c]]])
         counter[c] += 1
       else:
@@ -157,6 +159,9 @@ class EpisodeSampler(Sampler):
         info = {}
     else:
       cls_support = self.sample_classes(n, **kwargs)
+
+    # print(np.unique(np.array(cls_support), return_counts=True))
+
     cls_unique, idx = np.unique(np.array(cls_support), return_index=True)
     support = self.sample_images(cls_support, allow_repeat=allow_repeat)
     query = self.sample_test_images(cls_unique, support, m)

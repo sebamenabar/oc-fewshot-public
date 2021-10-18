@@ -69,13 +69,13 @@ class GRU(ContainerModule):
 class GRU1DMod(GRU):
   """GRU with 1-d gates and without activation"""
 
-  def __init__(self, name, nin, nout, layernorm=False, dtype=tf.float32):
+  def __init__(self, name, nin, nout, layernorm=False, bias_init=-2.0, dtype=tf.float32):
     super(GRU, self).__init__(dtype=dtype)
     self._nin = nin
     self._nout = nout
     self._layernorm = layernorm
     self._gates = Linear(
-        "gates_linear", nin + nout, 1, b_init=lambda: -tf.ones(1) * 2.0)
+        "gates_linear", nin + nout, 1, b_init=lambda: tf.ones(1) * bias_init)
     # self._gates = Linear(
     #     "gates_linear", nin + nout, 1, b_init=lambda: tf.ones(1) * 2.0)
     # self._gates = Linear(
@@ -102,6 +102,28 @@ class GRU1DMod(GRU):
     # tf.print('f gate', f_gate)
     h = (1.0 - f_gate) * h_last + f_gate * x
     return h, h
+
+  def end_iteration(self, h_last):
+    return h_last
+
+  def get_initial_state(self, bsize):
+    return tf.zeros([bsize, self.nout], dtype=self.dtype)
+
+  @property
+  def nin(self):
+    return self._nin
+
+  @property
+  def nout(self):
+    return self._nout
+
+  @property
+  def in_dim(self):
+    return self._nin
+
+  @property
+  def memory_dim(self):
+    return self._nout
 
 
 @RegisterModule('lstm1dmod')

@@ -54,7 +54,7 @@ def get_config(config_file, config_cls):
   return config
 
 
-def get_data_fs(env_config, load_train=False):
+def get_data_fs(env_config, load_train=False, **kwargs):
   """Gets few-shot dataset."""
   train_split = env_config.train_fs_split
   if train_split is None or (train_split == env_config.train_split and
@@ -62,17 +62,17 @@ def get_data_fs(env_config, load_train=False):
     data_train_fs = None
   else:
     data_train_fs = get_dataset(env_config.dataset, env_config.data_folder,
-                                env_config.train_fs_split)
+                                env_config.train_fs_split, **kwargs)
   if env_config.val_fs_split is None:
     data_val_fs = None
   else:
     data_val_fs = get_dataset(env_config.dataset, env_config.data_folder,
-                              env_config.val_fs_split)
+                              env_config.val_fs_split, **kwargs)
   if env_config.test_fs_split is None:
     data_test_fs = None
   else:
     data_test_fs = get_dataset(env_config.dataset, env_config.data_folder,
-                               env_config.test_fs_split)
+                               env_config.test_fs_split, **kwargs)
   return {
       'train_fs': data_train_fs,
       'val_fs': data_val_fs,

@@ -13,11 +13,11 @@ from fewshot.data.iterators import EpisodeIterator
 from fewshot.data.iterators import MinibatchIterator
 from fewshot.data.iterators import SemiSupervisedEpisodeIterator
 from fewshot.data.iterators import SimEpisodeIterator
-from fewshot.data.preprocessors import DataAugmentationPreprocessor
+from fewshot.data.preprocessors import DataAugmentationPreprocessor, DataAugmentationPreprocessor2
 from fewshot.data.preprocessors import NCHWPreprocessor
 from fewshot.data.preprocessors import NormalizationPreprocessor
 from fewshot.data.preprocessors import SequentialPreprocessor
-from fewshot.data.preprocessors import RandomBoxOccluder
+from fewshot.data.preprocessors.random_box_occluder import RandomBoxOccluder, RandomBoxOccluderNoF
 from fewshot.data.samplers import FewshotSampler
 from fewshot.data.samplers import HierarchicalEpisodeSampler
 from fewshot.data.samplers import MinibatchSampler
@@ -33,7 +33,16 @@ def get_dataiter(data,
                  batch_size,
                  nchw=False,
                  data_aug=False,
-                 distributed=False):
+                 distributed=False,
+                 random_box=False,
+                 contrastive=False,
+                 roaming_rooms=False,
+                 jitter=False,
+                 mean=None,
+                 std=None,
+                 da_prep2=False,
+                 min_object_covered=0.2,
+                 ):
   """Gets dataset iterator."""
   md = data['metadata']
   if distributed:
@@ -46,29 +55,67 @@ def get_dataiter(data,
   sampler_dict['train'] = MinibatchSampler(seed, cycle=True, shuffle=True)
   sampler_dict['val'] = MinibatchSampler(seed, cycle=False, shuffle=False)
   sampler_dict['test'] = MinibatchSampler(seed, cycle=False, shuffle=False)
+  if (mean is None) or (std is None):
+    mean = md.mean_pix
+    std = md.std_pix 
   norm_prep = NormalizationPreprocessor(
-      mean=np.array(md.mean_pix), std=np.array(md.std_pix))
-  da_prep = DataAugmentationPreprocessor(md.image_size, md.crop_size,
+      mean=np.array(mean), std=np.array(std))
+
+
+  val_prep_list = []
+  train_prep_list = []
+
+  if da_prep2:
+    DaPrep = lambda *args: DataAugmentationPreprocessor2(*args, min_object_covered=min_object_covered)
+  else:
+    DaPrep = DataAugmentationPreprocessor
+  da_prep = DaPrep(md.image_size, md.crop_size,
                                          md.random_crop, md.random_flip,
                                          md.random_color, md.random_rotate)
+
+                                    
+  # if nchw:
+  #   nchw_prep = NCHWPreprocessor()
+  #   if data_aug:
+  #     train_prep = SequentialPreprocessor(da_prep, norm_prep, nchw_prep)
+  #   else:
+  #     train_prep = SequentialPreprocessor(norm_prep, nchw_prep)
+  #   val_prep = SequentialPreprocessor(norm_prep, nchw_prep)
+  #   test_prep = SequentialPreprocessor(norm_prep, nchw_prep)
+  # else:
+  #   train_prep = SequentialPreprocessor(da_prep, norm_prep)
+  #   val_prep = norm_prep
+  #   test_prep = norm_prep
+  # prep = {'train': train_prep, 'val': val_prep, 'test': test_prep}
+
+  if data_aug:
+    train_prep_list.append(da_prep)
+  
+  if random_box:
+    random_box_prep = RandomBoxOccluder()
+    train_prep_list.append(random_box_prep)
+    val_prep_list.append(random_box_prep)
+
+
+  train_prep_list.append(norm_prep)
+  val_prep_list.append(norm_prep)
+
   if nchw:
     nchw_prep = NCHWPreprocessor()
-    if data_aug:
-      train_prep = SequentialPreprocessor(da_prep, norm_prep, nchw_prep)
-    else:
-      train_prep = SequentialPreprocessor(norm_prep, nchw_prep)
-    val_prep = SequentialPreprocessor(norm_prep, nchw_prep)
-    test_prep = SequentialPreprocessor(norm_prep, nchw_prep)
-  else:
-    train_prep = SequentialPreprocessor(da_prep, norm_prep)
-    val_prep = norm_prep
-    test_prep = norm_prep
-  prep = {'train': train_prep, 'val': val_prep, 'test': test_prep}
+    train_prep_list.append(nchw_prep)
+    val_prep_list.append(nchw_prep)
+
+  train_prep = SequentialPreprocessor(*train_prep_list)
+  val_prep = SequentialPreprocessor(*val_prep_list)
+  prep = {'train': train_prep, 'val': val_prep, 'test': val_prep}
+
   it_dict = {}
   for k in ['train', 'val', 'test']:
     cycle = k == 'train'
     it_dict[k] = MinibatchIterator(data[k], sampler_dict[k], batch_size,
-                                   prep[k])
+                                   preprocessor=prep[k], contrastive=contrastive, roaming_rooms=roaming_rooms,
+                                   jitter=jitter,
+                                   )
   return it_dict
 
 
@@ -124,7 +171,11 @@ def get_dataiter_continual(data,
                            save_additional_info=False,
                            random_box=False,
                            distributed=False,
-                           seed=0):
+                           mean=None,
+                           std=None,
+                           seed=0,
+                           da_prep2=False,
+                           min_object_covered=0.2):
   """Gets few-shot episode iterator.
 
   Args:
@@ -270,11 +321,20 @@ def get_dataiter_continual(data,
     bg_processor_dict = dict(zip(split_list, [None] * len(split_list)))
 
   # Data preprocessors.
+  if (mean is None) or (std is None):
+    mean = md.mean_pix
+    std = md.std_pix 
   norm_prep = NormalizationPreprocessor(
-      mean=np.array(md.mean_pix), std=np.array(md.std_pix))
-  da_prep = DataAugmentationPreprocessor(md.image_size, md.crop_size,
-                                         md.random_crop, md.random_flip,
-                                         md.random_color, md.random_rotate)
+      mean=np.array(mean), std=np.array(std))
+  if da_prep2:
+    DaPrep = lambda *args: DataAugmentationPreprocessor2(
+      *args, min_object_covered=min_object_covered
+    )
+  else:
+    DaPrep = DataAugmentationPreprocessor
+  da_prep = DaPrep(md.image_size, md.crop_size,
+                                        md.random_crop, md.random_flip,
+                                        md.random_color, md.random_rotate)
   nchw_prep = NCHWPreprocessor()
   random_box_prep = RandomBoxOccluder()
 
@@ -309,6 +369,9 @@ def get_dataiter_continual(data,
   # Key, batch size
   for k, b in zip(['train_fs', 'trainval_fs', 'val_fs', 'test_fs'],
                   [batch_size, 1, 1, 1]):
+  # for k, b in zip(['train_fs', 'val_fs'],
+  #                 [1, 1]):
+    # print(k)
     it_dict[k] = IteratorClass(
         data[k],
         sampler_dict[k],
@@ -331,7 +394,8 @@ def get_dataiter_sim(data,
                      nchw=True,
                      prefetch=True,
                      distributed=False,
-                     seed=0):
+                     seed=0,
+                     normalize=True,):
   """Gets few-shot episode iterator in simulated environment.
 
   Args:
@@ -364,8 +428,11 @@ def get_dataiter_sim(data,
     sampler_dict[k] = MinibatchSampler(s, cycle=cyc, shuffle=shuf)
 
   # Data preprocessors.
-  norm_prep = NormalizationPreprocessor(
-      mean=np.array(md.mean_pix), std=np.array(md.std_pix))
+  if normalize:
+    norm_prep = NormalizationPreprocessor(
+        mean=np.array(md.mean_pix), std=np.array(md.std_pix))
+  else:
+    norm_prep = NormalizationPreprocessor(mean=np.array([0]), std=np.array([1]))
 
   # Adds data iterators.
   IteratorClass = SimEpisodeIterator

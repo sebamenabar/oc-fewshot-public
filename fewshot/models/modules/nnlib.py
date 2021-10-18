@@ -23,7 +23,8 @@ class Conv2D(WeightModule):
                data_format='NCHW',
                dtype=tf.float32,
                wdict=None):
-    super(Conv2D, self).__init__(dtype=dtype)
+    # super(Conv2D, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     with variable_scope(name):
       kinit = self._get_normal_init(
           [filter_size, filter_size, in_filters, out_filters])
@@ -52,7 +53,8 @@ class Linear(WeightModule):
                add_bias=True,
                dtype=tf.float32,
                wdict=None):
-    super(Linear, self).__init__(dtype=dtype)
+    # super(Linear, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     if w_init is None:
       w_init = self._get_uniform_init(in_dim, out_dim)
     if b_init is None:
@@ -83,26 +85,35 @@ class CosineLinear(WeightModule):
                w_init=None,
                temp=None,
                learn_temp=False,
+               cosine_bias=False,
                dtype=tf.float32,
                wdict=None):
-    super(CosineLinear, self).__init__(dtype=dtype)
+    # super(CosineLinear, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     if w_init is None:
       w_init = self._get_uniform_init(in_dim, out_dim)
     with variable_scope(name):
       self._weight = self._get_variable("w", w_init, wdict=wdict)
+    self.cosine_bias = cosine_bias
+    if cosine_bias:
+      with variable_scope(name):
+        self._bias = self._get_variable("b", self._get_constant_init([out_dim], 0.0), wdict=wdict)
+
     self._in_dim = in_dim
     self._out_dim = out_dim
     self._name = name
     if not learn_temp:
       self._temp = temp
     else:
-      self._temp = self._get_variable("temp", lambda: tf.zero([]) + temp)
+      self._temp = self._get_variable("temp", lambda: tf.zeros([]) + temp)
 
   def forward(self, x, **kwargs):
     z = tf.matmul(x, self._weight)
     x_norm = tf.maximum(tf.norm(x, axis=-1, keepdims=True), 1e-7)
     w_norm = tf.maximum(tf.norm(self._weight, axis=0, keepdims=True), 1e-7)
     z = z / x_norm / w_norm
+    if self.cosine_bias:
+      z = z + self._bias
     if self._temp is not None:
       z *= self._temp
     return z
@@ -119,7 +130,8 @@ class BatchNorm(WeightModule):
                decay=0.999,
                dtype=tf.float32,
                wdict=None):
-    super(BatchNorm, self).__init__(dtype=dtype)
+    # super(BatchNorm, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     assert data_format in ["NCHW", "NHWC", "NHC", "NC"]
     if data_format == "NCHW":
       self._axis = 1

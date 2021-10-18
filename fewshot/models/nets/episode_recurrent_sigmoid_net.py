@@ -8,7 +8,9 @@ from __future__ import (absolute_import, division, print_function,
 import tensorflow as tf
 
 from fewshot.models.nets.episode_recurrent_net import EpisodeRecurrentNet
+from fewshot.utils.logger import get as get_logger
 
+log = get_logger()
 
 class dummy_context_mgr():
 
@@ -79,6 +81,7 @@ class EpisodeRecurrentSigmoidNet(EpisodeRecurrentNet):
     xent = self.wt_avg(xent, flag)
     return xent
 
+  @tf.function
   def compute_loss(self,
                    x,
                    y,
@@ -88,16 +91,17 @@ class EpisodeRecurrentSigmoidNet(EpisodeRecurrentNet):
                    y_test=None,
                    flag=None,
                    flag_test=None,
+                  #  backbone_is_training=None,
                    **kwargs):
     """Compute the training loss."""
     if x_test is not None:
       assert y_test is not None
       logits, logits_test = self.forward(
-          x, y, s=s, x_test=x_test, is_training=tf.constant(True))
+          x, y, s=s, x_test=x_test, is_training=tf.constant(True), **kwargs)
       logits_all = tf.concat([logits, logits_test], axis=1)  # [B, T+N, Kmax+1]
       labels_all = tf.concat([y_gt, y_test], axis=1)  # [B, T+N]
     else:
-      logits = self.forward(x, y, s=s, is_training=tf.constant(True))
+      logits = self.forward(x, y, s=s, is_training=tf.constant(True), **kwargs)
       logits_all = logits
       labels_all = y_gt
     K = self.config.num_classes
@@ -115,8 +119,9 @@ class EpisodeRecurrentSigmoidNet(EpisodeRecurrentNet):
     # Regularizers.
     reg_loss = self._get_regularizer_loss(*self.regularized_weights())
     xent += self.config.unknown_loss * xent_unk
-    loss = xent + reg_loss * self.wd
-    return loss, {'xent': xent, 'xent_unk': xent_unk}
+    wd_loss = reg_loss * self.wd
+    loss = xent + wd_loss
+    return loss, {'xent': xent, 'xent_unk': xent_unk, "wnorm": reg_loss, "wd": wd_loss}
 
   @tf.function
   def train_step(self,
@@ -129,6 +134,8 @@ class EpisodeRecurrentSigmoidNet(EpisodeRecurrentNet):
                  y_test=None,
                  flag_test=None,
                  writer=None,
+                 return_metric=False,
+                #  skip_nan=False,
                  **kwargs):
     """One training step.
 
@@ -172,7 +179,10 @@ class EpisodeRecurrentSigmoidNet(EpisodeRecurrentNet):
 
       # Apply gradients.
       # if not tf.math.is_nan(xent_sync):
-      self.apply_gradients(loss, tape)
+      if not tf.math.is_nan(loss):
+        self.apply_gradients(loss, tape)
+      else:
+        log.info("Nan loss encountered, skipping gradients.")
 
       write_flag = self._distributed and hvd.rank() == 0
       write_flag = write_flag or (not self._distributed)
@@ -191,7 +201,10 @@ class EpisodeRecurrentSigmoidNet(EpisodeRecurrentNet):
                 tf.reduce_mean(tf.cast(self._ssl_store, tf.float32)),
                 step=self._step + 1)
           writer.flush()
-    return xent_sync
+    if return_metric:
+      return xent_sync, metric
+    else:
+      return xent_sync
 
   def renormalize(self, logits):
     """Renormalize the logits, with the last dimension to be unknown. The rest

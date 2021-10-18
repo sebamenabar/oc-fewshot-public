@@ -7,6 +7,7 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 import numpy as np
+from numpy.lib.financial import pv
 
 from fewshot.data.registry import RegisterSampler
 from fewshot.data.samplers.episode_sampler import EpisodeSampler
@@ -51,7 +52,10 @@ class CRPSampler(EpisodeSampler):
       p_old = (m_array[:k] - alpha) / (m + theta)
       # print('pold', p_old)
       pvals = list(p_old) + [p_new]
+      # print("pvals")
+      # print(pvals)
       sample = self.rnd.multinomial(1, pvals, size=1)
+      # print(sample)
       sample = sample.reshape([-1])
       # print('sample', sample, sample.shape)
       if k == n:  # Reached the maximum classes.

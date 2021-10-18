@@ -26,10 +26,13 @@ class MinDistProtoMemory(ProtoMemory):
                fix_unknown=False,
                unknown_id=None,
                similarity="euclidean",
+               normalize_feature=False,
                static_beta_gamma=True,
                unknown_logits="radii",
                temp_init=10.0,
                dtype=tf.float32,
+               learn_w0=False,
+               learn_temp=False,
                **kwargs):
     super(MinDistProtoMemory, self).__init__(
         name,
@@ -38,8 +41,12 @@ class MinDistProtoMemory(ProtoMemory):
         fix_unknown=fix_unknown,
         unknown_id=unknown_id,
         similarity=similarity,
+        normalize_feature=normalize_feature,
         temp_init=temp_init,
-        dtype=dtype)
+        dtype=dtype,
+        learn_w0=learn_w0,
+        # learn_temp=learn_temp,
+        )
     self._radius_init = radius_init
     self._unknown_logits = unknown_logits
     if static_beta_gamma:

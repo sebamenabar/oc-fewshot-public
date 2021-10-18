@@ -36,18 +36,18 @@ class PretrainNet(Net):
     out_dim = backbone.get_output_dimension()
     self._fc = Linear("fc", out_dim[-1], config.num_classes, dtype=dtype)
 
-  def forward(self, x, is_training=tf.constant(True)):
+  def forward(self, x, is_training=tf.constant(True), **kwargs):
     """Run forward pass."""
-    h = self.backbone(x, is_training=is_training)
+    h = self.backbone(x, is_training=is_training, **kwargs)
     logits = self._fc(h)
     return logits
 
   @tf.function
-  def train_step(self, x, y):
+  def train_step(self, x, y, **kwargs):
     """One training step."""
     # Calculates gradients
     with tf.GradientTape() as tape:
-      logits = self.forward(x, is_training=tf.constant(True))
+      logits = self.forward(x, is_training=tf.constant(True), **kwargs)
       xent = tf.reduce_mean(
           tf.nn.sparse_softmax_cross_entropy_with_logits(
               logits=logits, labels=y))

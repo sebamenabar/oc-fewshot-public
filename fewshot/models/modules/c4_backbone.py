@@ -6,6 +6,7 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 import tensorflow as tf
+from tensorflow.python.ops.nn_ops import dropout
 
 from fewshot.models.modules.backbone import Backbone
 from fewshot.models.modules.container_module import ContainerModule
@@ -28,7 +29,10 @@ class ConvModule(ContainerModule):
                data_format="NCHW",
                pool_padding="SAME",
                dtype=tf.float32,
-               wdict=None):
+               wdict=None,
+               add_dropout=False,
+               dropout_rate=0.0,
+               ):
     super(ConvModule, self).__init__()
     self._data_format = data_format
     with variable_scope(name):
@@ -46,6 +50,8 @@ class ConvModule(ContainerModule):
     self._stride = stride
     self._add_relu = add_relu
     self._pool_padding = pool_padding
+    self.add_dropout = add_dropout
+    self.dropout_rate = dropout_rate
 
   def _stride_arr(self, stride):
     """Map a stride scalar to the stride array for tf.nn.conv2d."""
@@ -70,6 +76,9 @@ class ConvModule(ContainerModule):
           self._stride_arr(self._stride),
           padding=self._pool_padding,
           data_format=self._data_format)
+    if is_training and self.add_dropout and self.dropout_rate > 0.:
+      log.info('Apply droppout with rate {}'.format(self.dropout_rate))
+      x = tf.nn.dropout(x, self.dropout_rate)
     return x
 
 
@@ -92,7 +101,9 @@ class C4Backbone(Backbone):
         stride=pool[0],
         pool_padding=config.pool_padding,
         data_format=config.data_format,
-        wdict=wdict)
+        wdict=wdict,
+        add_dropout=self.config.add_dropout,
+        dropout_rate=self.config.dropout_rate)
     self._conv2 = ConvModule(
         "conv2",
         config.num_filters[0],
@@ -100,7 +111,9 @@ class C4Backbone(Backbone):
         stride=pool[1],
         pool_padding=config.pool_padding,
         data_format=config.data_format,
-        wdict=wdict)
+        wdict=wdict,
+        add_dropout=self.config.add_dropout,
+        dropout_rate=self.config.dropout_rate)
     self._conv3 = ConvModule(
         "conv3",
         config.num_filters[1],
@@ -108,7 +121,9 @@ class C4Backbone(Backbone):
         stride=pool[2],
         pool_padding=config.pool_padding,
         data_format=config.data_format,
-        wdict=wdict)
+        wdict=wdict,
+        add_dropout=self.config.add_dropout,
+        dropout_rate=self.config.dropout_rate)
     self._conv4 = ConvModule(
         "conv4",
         config.num_filters[2],
@@ -117,16 +132,22 @@ class C4Backbone(Backbone):
         add_relu=config.add_last_relu,
         pool_padding=config.pool_padding,
         data_format=config.data_format,
-        wdict=wdict)
+        wdict=wdict,
+        add_dropout=self.config.add_dropout,
+        dropout_rate=self.config.dropout_rate)
 
-  def forward(self, x, is_training, **kwargs):
+  def forward(self, x, is_training, last_is_training=None, **kwargs):
+    _is_training = is_training
     for m in [self._conv1, self._conv2, self._conv3, self._conv4]:
-      x = m(x, is_training=is_training)
+      if m == self._conv4 and last_is_training is not None:
+        _is_training = last_is_training
+        log.info(f"Last is training: {last_is_training}")
+      x = m(x, is_training=_is_training)
     x = tf.reshape(x, [tf.shape(x)[0], -1])
     if self.config.activation_scaling > 0:
       x = x * self.config.activation_scaling
 
-    if self.config.add_dropout and is_training:
-      log.info('Apply droppout with rate {}'.format(self.config.dropout_rate))
-      x = tf.nn.dropout(x, self.config.dropout_rate)
+    # if self.config.add_dropout and is_training:
+    #   log.info('Apply droppout with rate {}'.format(self.config.dropout_rate))
+    #   x = tf.nn.dropout(x, self.config.dropout_rate)
     return x

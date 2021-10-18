@@ -137,6 +137,8 @@ class MarkovSwitchBlender(Blender):
     # Markov switching process.
     while len(result) < totallen:
 
+      # print("blender", result)
+
       # Reindex the classes.
       if cls_list2[s] is None:
 
@@ -158,5 +160,9 @@ class MarkovSwitchBlender(Blender):
       # Decides whether to switch stage.
       if self.sample_switch():
         s = self.sample_random()
+
+    # print("blend")
+    # print(result)
+    # print(flag)
 
     return np.array(result), np.array(flag)

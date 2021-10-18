@@ -11,6 +11,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import pickle as pkl
 import six
 import tensorflow as tf
+from sklearn.metrics import pairwise
+import numpy as np
 
 from tqdm import tqdm
 
@@ -56,7 +58,11 @@ def evaluate(model, dataiter, num_steps, verbose=False):
   if verbose:
     it = tqdm(it, ncols=0)
   results = []
+  nns = []
   for i, batch in zip(it, dataiter):
+
+    # print(batch)
+
     x = batch['x_s']
     y = batch['y_s']
     y_gt = batch['y_gt']
@@ -69,6 +75,13 @@ def evaluate(model, dataiter, num_steps, verbose=False):
     else:
       flag = None
     pred = model.eval_step(x, y, **kwargs)
+
+    x = tf.squeeze(x, 0)
+    _y = tf.squeeze(y, 0)
+    feats = model.backbone(x, is_training=False)
+
+    c_distances = pairwise.cosine_distances((feats))
+    nn = (_y.numpy() == _y.numpy()[(c_distances + 2 * np.eye(c_distances.shape[0])).argmin(axis=-1)]).mean()
 
     # Support set metrics, accumulate per number of shots.
     y_np = y_full.numpy()  # [B, T]
@@ -90,15 +103,18 @@ def evaluate(model, dataiter, num_steps, verbose=False):
         'y_s': y_s_np,
         'pred': pred_np,
         'pred_id': pred_id_np,
-        'flag': flag
+        'flag': flag,
+        # 'nn': nn,
     })
-  return results
+    nns.append(nn)
+  return results, nns
 
 
 def train(model,
           dataiter,
           dataiter_traintest,
           dataiter_test,
+          dataiter_test_test,
           ckpt_folder,
           final_save_folder=None,
           nshot_max=5,
@@ -107,7 +123,8 @@ def train(model,
           writer=None,
           in_stage=False,
           is_chief=True,
-          reload_flag=None):
+          reload_flag=None,
+          backbone_is_training=True):
   """Trains the online few-shot model.
   Args:
     model: Model instance.
@@ -130,6 +147,7 @@ def train(model,
   keep = True
   restart = False
   best_val = 0.0
+  results = {}
   while keep:
     keep = False
     start = model.step.numpy()
@@ -139,13 +157,16 @@ def train(model,
     if is_chief:
       it = tqdm(it, ncols=0)
     for i, batch in zip(it, dataiter):
+
+      # print(batch)
+
       tf.summary.experimental.set_step(i + 1)
       x = batch['x_s']
       y = batch['y_s']
       y = batch['y_s']
       y_gt = batch['y_gt']
 
-      kwargs = {'y_gt': y_gt, 'flag': batch['flag_s']}
+      kwargs = {'y_gt': y_gt, 'flag': batch['flag_s'], "backbone_is_training": backbone_is_training}
       kwargs['writer'] = writer
 
       loss = model.train_step(x, y, **kwargs)
@@ -178,20 +199,29 @@ def train(model,
         break
 
       # Evaluate.
+      
       if is_chief and ((i + 1) % config.steps_per_val == 0 or i == 0):
-        for key, data_it_ in zip(['train', 'val'],
-                                 [dataiter_traintest, dataiter_test]):
+        for key, data_it_ in zip(['train', 'val', 'test'],
+                                 [dataiter_traintest, dataiter_test, dataiter_test_test]):
           data_it_.reset()
-          r1 = evaluate(model, data_it_, 120)
+          r1, nns = evaluate(model, data_it_, 120)
+          # print(r1)
+          # print(nns)
           r = get_stats(r1, nshot_max=nshot_max, tmax=maxlen)
+          nn = np.mean(nns)
           for s in range(nshot_max):
             try_log('online fs acc {}/s{}'.format(key, s), i + 1,
                     r['acc_nshot'][s] * 100.0)
           try_log('online fs ap {}'.format(key), i + 1, r['ap'] * 100.0)
+          try_log('nn {}'.format(key), i + 1, nn * 100.0)
+
+          results[key] = (r, nn)
+
         try_log('lr', i + 1, model.learn_rate())
         print()
 
       # Save.
+      r = results['val'][0]
       if is_chief and ((i + 1) % config.steps_per_save == 0 or i == 0):
         model.save(os.path.join(ckpt_folder, 'weights-{}'.format(i + 1)))
 
@@ -212,7 +242,11 @@ def train(model,
         post_fix_dict['lr'] = '{:.3e}'.format(model.learn_rate())
         post_fix_dict['loss'] = '{:.3e}'.format(loss)
         if r is not None:
-          post_fix_dict['ap_val'] = '{:.3f}'.format(r['ap'] * 100.0)
+          post_fix_dict['ap_val'] = '{:.3f}'.format(results["val"][0]['ap'] * 100.0)
+          post_fix_dict['ap_test'] = '{:.3f}'.format(results["test"][0]['ap'] * 100.0)
+          post_fix_dict['nn_val'] = '{:.3f}'.format(results["val"][1] * 100.0)
+          post_fix_dict['nn_train'] = '{:.3f}'.format(results["train"][1] * 100.0)
+          post_fix_dict['nn_test'] = '{:.3f}'.format(results["test"][1] * 100.0)
         it.set_postfix(**post_fix_dict)
 
   # Save.
@@ -253,6 +287,7 @@ def main():
 
   if not args.reeval:
     model = build_pretrain_net(config)
+    # mem_model = build_net(config, backbone=model.backbone, learn_temp=args.learn_temp)
     mem_model = build_net(config, backbone=model.backbone)
     reload_flag = None
     restore_steps = 0
@@ -264,13 +299,13 @@ def main():
       ckpt_folder = save_folder
 
     # Reload previous checkpoint.
-    if os.path.exists(ckpt_folder) and not args.eval:
-      latest = latest_file(ckpt_folder, 'weights-')
-      if latest is not None:
-        log.info('Checkpoint already exists. Loading from {}'.format(latest))
-        mem_model.load(latest)  # Not loading optimizer weights here.
-        reload_flag = latest
-        restore_steps = int(reload_flag.split('-')[-1])
+    # if os.path.exists(ckpt_folder) and not args.eval:
+    #   latest = latest_file(ckpt_folder, 'weights-')
+    #   if latest is not None:
+    #     log.info('Checkpoint already exists. Loading from {}'.format(latest))
+    #     mem_model.load(latest)  # Not loading optimizer weights here.
+    #     reload_flag = latest
+    #     restore_steps = int(reload_flag.split('-')[-1])
 
     if not args.eval:
       save_config(config, save_folder)
@@ -281,9 +316,19 @@ def main():
       logger = ExperimentLogger(writer)
 
     # Get dataset.
-    dataset = get_data_fs(env_config, load_train=True)
+    if args.to_rgb is not False:
+      data_kwargs = {"to_rgb": args.to_rgb}
+    else:
+      data_kwargs = {}
+    dataset = get_data_fs(env_config, load_train=True, **data_kwargs)
 
     # Get data iterators.
+    mean = std = None
+    if args.use_dataset_stats:
+      if env_config.dataset == "tiered-imagenet":
+        log.info('Using tiered-imagenet stats')
+        mean = [120.39586422 / 255.0, 115.59361427 / 255.0, 104.54012653 / 255.0] 
+        std = [70.68188272 / 255.0, 68.27635443 / 255.0, 72.54505529 / 255.0]
     if env_config.dataset in ["matterport", "roaming-rooms"]:
       data = get_dataiter_sim(
           dataset,
@@ -299,15 +344,32 @@ def main():
           nchw=mem_model.backbone.config.data_format == 'NCHW',
           save_additional_info=True,
           random_box=data_config.random_box,
-          seed=args.seed + restore_steps)
+          seed=args.seed + restore_steps,
+          da_prep2=args.da_prep2,
+          mean=mean,
+          std=std,
+          min_object_covered=args.min_object_covered,
+          )
 
   # Load model, training loop.
+  # if args.pretrain is not None and reload_flag is None:
+  backbone_is_training = True
+
+  if args.load_memory_module is not None:
+    log.info(f"Loading memory module {args.load_memory_module}")
+    mem_model.load(args.load_memory_module, load_optimizer=False, load_step=False)
+
+  if args.pretrain is not None:
+    # model.load(latest_file(args.pretrain, 'weights-'))
+    weights_fp = latest_file(args.pretrain, 'weights-')
+    if weights_fp is None:
+      weights_fp = args.pretrain
+    model.load(weights_fp, skip_fc=True, load_optimizer=False)
+    if config.freeze_backbone:
+      model.set_trainable(False)  # Freeze the network.
+      log.info('Backbone network is now frozen')
+    backbone_is_training = not config.freeze_backbone
   if not args.eval:
-    if args.pretrain is not None and reload_flag is None:
-      model.load(latest_file(args.pretrain, 'weights-'))
-      if config.freeze_backbone:
-        model.set_trainable(False)  # Freeze the network.
-        log.info('Backbone network is now frozen')
     with writer.as_default() if writer is not None else dummy_context_mgr(
     ) as gs:
       train(
@@ -315,13 +377,15 @@ def main():
           data['train_fs'],
           data['trainval_fs'],
           data['val_fs'],
+          data['test_fs'],
           ckpt_folder,
           final_save_folder=save_folder,
           maxlen=data_config.maxlen,
           logger=logger,
           writer=writer,
           in_stage=config.in_stage,
-          reload_flag=reload_flag)
+          reload_flag=reload_flag,
+          backbone_is_training=backbone_is_training)
   else:
     results_file = os.path.join(save_folder, 'results.pkl')
     logfile = os.path.join(save_folder, 'results.csv')
@@ -346,7 +410,8 @@ def main():
         if latest is not None:
           mem_model.load(latest)
         else:
-          raise ValueError('Checkpoint not found')
+          # raise ValueError('Checkpoint not found')
+          print('Checkpoint not found')
       data['trainval_fs'].reset()
       data['val_fs'].reset()
       data['test_fs'].reset()
@@ -370,10 +435,10 @@ def main():
 
       for split, name, N in zip(split_list, name_list, nepisode_list):
         data[split].reset()
-        r1 = evaluate(mem_model, data[split], N, verbose=True)
+        r1, nns = evaluate(mem_model, data[split], N, verbose=True)
         stats = get_stats(r1, tmax=data_config.maxlen)
-        log_results(stats, prefix=name, filename=logfile)
-        results_all[split] = r1
+        log_results(stats, prefix=name, filename=logfile, nns=nns)
+        results_all[split] = (r1, nns)
       pkl.dump(results_all, open(results_file, 'wb'))
 
 
@@ -390,6 +455,12 @@ if __name__ == '__main__':
   parser.add_argument('--valonly', action='store_true')
   parser.add_argument('--usebest', action='store_true')
   parser.add_argument('--seed', type=int, default=0)
+  parser.add_argument('--da_prep2', action="store_true", default=False)
+  parser.add_argument('--to_rgb', action="store_true", default=False)
+  parser.add_argument('--use_dataset_stats', default=False, action="store_true")
+  parser.add_argument('--min_object_covered', default=0.2, type=float)
+  parser.add_argument('--load_memory_module', default=None)
   args = parser.parse_args()
-  tf.random.set_seed(1234)
+  # tf.random.set_seed(1234)
+  tf.random.set_seed(args.seed)
   main()

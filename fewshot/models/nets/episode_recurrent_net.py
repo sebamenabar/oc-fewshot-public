@@ -20,7 +20,8 @@ class EpisodeRecurrentNet(Net):
   """
 
   def __init__(self, config, backbone, distributed=False, dtype=tf.float32):
-    super(EpisodeRecurrentNet, self).__init__(dtype=dtype)
+    # super(EpisodeRecurrentNet, self).__init__(dtype=dtype)
+    super().__init__(dtype=dtype)
     self._config = config
     self._backbone = backbone
     self._wd = backbone.config.weight_decay
@@ -57,7 +58,7 @@ class EpisodeRecurrentNet(Net):
     """Gets the t-th timestep input."""
     return x[:, t]
 
-  def run_backbone(self, x, is_training=tf.constant(True)):
+  def run_backbone(self, x, is_training=tf.constant(True), last_is_training=None, **kwargs):
     """Run backbone.
 
     Args:
@@ -69,7 +70,7 @@ class EpisodeRecurrentNet(Net):
     x_shape = tf.shape(x)
     new_shape = tf.concat([[x_shape[0] * x_shape[1]], x_shape[2:]], axis=0)
     x = tf.reshape(x, new_shape)
-    x = self.backbone(x, is_training=is_training)
+    x = self.backbone(x, is_training=is_training, last_is_training=last_is_training)
     h_shape = tf.shape(x)
     old_shape = tf.concat([x_shape[:2], h_shape[1:]], axis=0)
     x = tf.reshape(x, old_shape)
@@ -112,11 +113,11 @@ class EpisodeRecurrentNet(Net):
         # Additional query set (optional).
         assert y_test is not None
         logits, logits_test = self.forward(
-            x, y, s=s, x_test=x_test, is_training=tf.constant(True))
+            x, y, s=s, x_test=x_test, is_training=tf.constant(True), **kwargs)
         logits_all = tf.concat([logits, logits_test], axis=1)  # [B, T+N, Kmax]
         labels_all = tf.concat([y_gt, y_test], axis=1)  # [B, T+N]
       else:
-        logits = self.forward(x, y, s=s, is_training=tf.constant(True))
+        logits = self.forward(x, y, s=s, is_training=tf.constant(True), **kwargs)
         logits_all = logits
         labels_all = y_gt
 
@@ -162,7 +163,18 @@ class EpisodeRecurrentNet(Net):
         #     tf.reduce_mean(g) for g in filter(lambda g: g is not None, grad_list)
         # ])
         # if not tf.math.is_nan(gall):
-      self.optimizer.apply_gradients(zip(grad_list, var_list))
+      # print(grad_list)
+      # print(var_list)
+
+      for w in grad_list:
+        if w is not None:
+            if tf.reduce_any(tf.math.is_nan(w)):
+                print("nan")
+
+      clean_grads = [tf.where(tf.math.is_nan(w), tf.zeros_like(w), w) if tf.is_tensor(w) else w for w in grad_list]
+      self.optimizer.apply_gradients(zip(clean_grads, var_list))
+
+      # self.optimizer.apply_gradients(zip(grad_list, var_list))
       # else:
       #   tf.print('NaN in gradient detected!')
     else:

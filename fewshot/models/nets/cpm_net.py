@@ -50,7 +50,7 @@ class CPMNet(EpisodeRecurrentSigmoidNet):
     """
     return self.memory(t, x, y_prev, *h, store=store, ssl_store=ssl_store)
 
-  def forward(self, x, y, *states, is_training=tf.constant(True), **kwargs):
+  def forward(self, x, y, *states, is_training=tf.constant(True), backbone_is_training=None, last_is_training=None, **kwargs):
     """Make a forward pass.
 
     Args:
@@ -61,7 +61,10 @@ class CPMNet(EpisodeRecurrentSigmoidNet):
     Returns:
       y_pred: [B, T]. Support example prediction.
     """
-    x = self.run_backbone(x, is_training=is_training)
+    if backbone_is_training is None:
+      backbone_is_training = is_training
+    log.info(f"Backbone is training: {backbone_is_training}")
+    x = self.run_backbone(x, is_training=backbone_is_training, last_is_training=last_is_training)
     B = tf.constant(x.shape[0])
     T = tf.constant(x.shape[1])
     y_pred = tf.TensorArray(self.dtype, size=T)

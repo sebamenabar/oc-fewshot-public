@@ -371,7 +371,8 @@ class SimEpisodeIterator(Iterator):
     # Get one ID.
     item = None
     while item is None:
-      idx = self.sampler.sample_collection(self.batch_size)
+      # idx = self.sampler.sample_collection(self.batch_size)
+      idx = self.sampler.sample_collection(1)
       if idx is None:
         break
       else:

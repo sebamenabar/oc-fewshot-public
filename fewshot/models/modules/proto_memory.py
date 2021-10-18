@@ -25,13 +25,17 @@ class ProtoMemory(ContainerModule):
                unknown_id=None,
                similarity="euclidean",
                temp_init=10.0,
-               dtype=tf.float32):
-    super(ProtoMemory, self).__init__(dtype=dtype)
+               dtype=tf.float32,
+               config=None,
+               learn_w0=False):
+    super().__init__(dtype=dtype)
     self._max_classes = max_classes
     self._fix_unknown = fix_unknown
     self._unknown_id = unknown_id
     self._similarity = similarity
+    self._normalize_feature = config.normalize_feature
     self._dim = dim
+    self.learn_w0 = learn_w0
     if fix_unknown:
       log.info('Fixing unknown id')
       assert unknown_id is not None, 'Need to provide unknown ID'
@@ -40,6 +44,9 @@ class ProtoMemory(ContainerModule):
       with variable_scope(name):
         self._temp = self._get_variable("temp",
                                         self._get_constant_init([], temp_init))
+    if learn_w0:
+      with variable_scope(name):
+        self.w0 = self._get_variable("w0", self._get_constant_init((1, dim,), 0.0))
         # self._temp = self._get_variable(
         #     "temp", self._get_constant_init([], temp_init), trainable=False)
 
@@ -122,6 +129,11 @@ class ProtoMemory(ContainerModule):
     return 2 / sqrt_c * tf.math.atanh(
         sqrt_c * tf.norm(self._mobius_addition_batch2(-x, y, c=c), axis=-1))
 
+  def _normalize(self, x):
+    """Normalize the feature vector."""
+    return x / tf.maximum(
+        tf.sqrt(tf.reduce_sum(x**2, [-1], keepdims=True)), 1e-5)
+
   def _mobius_addition_batch(self, x, y, c):
     """
       x: B x D
@@ -155,6 +167,9 @@ class ProtoMemory(ContainerModule):
       x: Input. [B, ...].
       y: Label. [B].
     """
+    if self._normalize_feature:
+      x = self._normalize(x)
+
     bidx = tf.range(tf.shape(y)[0])  # [B]
     y = tf.cast(y, bidx.dtype)
     idx = tf.stack([bidx, y], axis=1)  # [B, 2]
@@ -194,7 +209,12 @@ class ProtoMemory(ContainerModule):
     K = self.max_classes
     if self._fix_unknown:
       K += 1
-    storage = tf.zeros([bsize, K, self._dim], dtype=self.dtype)
+    if self.learn_w0:
+      print("learning w0")
+      storage = tf.repeat(self.w0, bsize * K, axis=0)
+      storage = tf.reshape(storage, (bsize, K, self._dim))
+    else:
+      storage = tf.zeros([bsize, K, self._dim], dtype=self.dtype)
     count = tf.zeros([bsize, K], dtype=self.dtype)
     return storage, count
 

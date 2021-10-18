@@ -25,11 +25,13 @@ class ResidualModule(ContainerModule):
                stride,
                data_format="NCHW",
                dtype=tf.float32,
-               add_relu=True):
+               add_relu=True,
+               drop_rate=0.0):
     super(ResidualModule, self).__init__()
     self._data_format = data_format
     self._name = name
     self._stride = stride
+    self.drop_rate = drop_rate
     with variable_scope(name):
       self._conv1 = Conv2D(
           "conv1",
@@ -98,7 +100,7 @@ class ResidualModule(ContainerModule):
       x = tf.pad(x, self._pad_arr)
     return x
 
-  def forward(self, x, is_training=True, **kwargs):
+  def forward(self, x, is_training=True, drop=False, **kwargs):
     origx = x
     x = self._conv1(x)
     x = self._bn1(x, is_training=is_training)
@@ -121,6 +123,13 @@ class ResidualModule(ContainerModule):
 
     if self._add_relu:
       x = tf.nn.relu(x)
+
+    if (is_training or drop) and self.drop_rate > 0.0:
+      log.info('Apply droppout block with rate {}'.format(self.drop_rate))
+      x = tf.nn.dropout(x, self.drop_rate)
+    # else:
+    #   log.info("Skip drop")
+
     return x
 
 
@@ -155,7 +164,7 @@ class Resnet12Backbone(Backbone):
       # Build residual unit.
       prefix = "unit_{}_{}".format(ss + 1, ii)
       add_relu = True if ll < nlayers - 1 or config.add_last_relu else False
-      log.info('{dd relu', add_relu)
+      log.info('{} relu'.format(add_relu))
       m = ResidualModule(
           prefix,
           in_filter,
@@ -163,7 +172,8 @@ class Resnet12Backbone(Backbone):
           stride,
           data_format=config.data_format,
           add_relu=add_relu,
-          dtype=dtype)
+          dtype=dtype,
+          drop_rate=self.config.dropout_rate if self.config.add_dropout else 0)
       self._blocks.append(m)
 
       if (ii + 1) % config.num_residual_units[ss] == 0:
@@ -185,7 +195,7 @@ class Resnet12Backbone(Backbone):
     else:
       return tf.reduce_mean(x, [1, 2], keepdims=keepdims)
 
-  def forward(self, x, is_training=True, **kwargs):
+  def forward(self, x, is_training=True, drop=False, **kwargs):
     # tf.print(
     #     'input',
     #     [tf.shape(x),
@@ -193,7 +203,9 @@ class Resnet12Backbone(Backbone):
     #      tf.reduce_max(x),
     #      tf.reduce_min(x)])
     for i, m in enumerate(self._blocks):
-      x = m(x, is_training=is_training)
+      # tf.print(tf.shape(x))
+      x = m(x, is_training=is_training, drop=drop)
+    # tf.print(tf.shape(x))
 
     # assert False, str(self.config.activation_scaling)
     if self.config.activation_scaling > 0.0:
@@ -205,7 +217,7 @@ class Resnet12Backbone(Backbone):
     #            [tf.reduce_mean(x),
     #             tf.reduce_max(x),
     #             tf.reduce_min(x)])
-    if self.config.add_dropout and is_training:
-      log.info('Apply droppout with rate {}'.format(self.config.dropout_rate))
-      x = tf.nn.dropout(x, self.config.dropout_rate)
+    # if self.config.add_dropout and (is_training or drop):
+    #   log.info('Apply droppout output with rate {}'.format(self.config.dropout_rate))
+    #   x = tf.nn.dropout(x, self.config.dropout_rate)
     return x

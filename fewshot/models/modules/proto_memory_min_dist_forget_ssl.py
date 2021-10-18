@@ -4,6 +4,7 @@ Author: Mengye Ren (mren@cs.toronto.edu)
 """
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
+from unicodedata import normalize
 
 import tensorflow as tf
 
@@ -30,6 +31,7 @@ class SemiSupervisedMinDistForgetProtoMemory(SemiSupervisedMinDistProtoMemory):
                fix_unknown=False,
                unknown_id=None,
                similarity="euclidean",
+               normalize_feature=False,
                static_beta_gamma=True,
                radius_init_write=None,
                use_ssl_beta_gamma_write=True,
@@ -42,6 +44,7 @@ class SemiSupervisedMinDistForgetProtoMemory(SemiSupervisedMinDistProtoMemory):
         fix_unknown=fix_unknown,
         unknown_id=unknown_id,
         similarity=similarity,
+        normalize_feature=normalize_feature,
         dtype=dtype)
 
     self._controller_type = 'linear'

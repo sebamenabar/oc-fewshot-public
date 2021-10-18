@@ -39,7 +39,7 @@ def build_pretrain_net(config, backbone=None):
   return model
 
 
-def build_memory_module(config, backbone):
+def build_memory_module(config, backbone, **kwargs):
   """Builds a memory module."""
   D = backbone.get_output_dimension()[0]
   K = config.num_classes + 1
@@ -59,6 +59,13 @@ def build_memory_module(config, backbone):
   else:
     raise ValueError('Unknown model class {}'.format(config.model_class))
 
+  # --------------------------------------------------------
+  # Build different memory modules.
+  config.memory_net_config.use_ssl_beta_gamma_write = config.hybrid_config.use_ssl_beta_gamma_write  # NOQA
+  config.memory_net_config.fix_unknown = config.fix_unknown
+  config.memory_net_config.unknown_id = config.num_classes
+  config.hybrid_config.readout_type = config.mann_config.readout_type
+
   if config.memory_class in [
       'min_dist_proto_memory', 'ssl_min_dist_proto_memory',
       'ssl_min_dist_forget_proto_memory'
@@ -77,7 +84,10 @@ def build_memory_module(config, backbone):
         use_ssl_beta_gamma_write=config.hybrid_config.use_ssl_beta_gamma_write,
         unknown_logits=config.memory_net_config.unknown_logits,
         temp_init=config.memory_net_config.temp_init,
-        dtype=tf.float32)
+        learn_w0=kwargs.get("learn_w0", False),
+        config=config.memory_net_config,
+        # learn_temp=kwargs.get("learn_temp", False),
+        dtype=tf.float32,)
 
   elif config.memory_class in [
       'online_matchingnet_memory', 'online_imp_memory',
@@ -240,6 +250,7 @@ def build_memory_module(config, backbone):
           controller_layernorm=config.mann_config.controller_layernorm,
           controller_nstack=config.mann_config.controller_nstack,
           similarity_type=config.mann_config.similarity_type,
+          config=config.mann_config,
           dtype=tf.float32)
     elif memory_class in ['stack_lstm']:
       rnn_memory = get_module(
@@ -270,6 +281,7 @@ def build_memory_module(config, backbone):
         static_beta_gamma=not config.hybrid_config.use_pred_beta_gamma,
         unknown_logits=config.memory_net_config.unknown_logits,
         temp_init=config.memory_net_config.temp_init,
+        config=config.memory_net_config,
         dtype=tf.float32)
     proto_plus_rnn = get_module(
         config.memory_class,
@@ -286,12 +298,21 @@ def build_memory_module(config, backbone):
         use_ssl=config.hybrid_config.use_ssl,
         use_ssl_beta_gamma_write=config.hybrid_config.use_ssl_beta_gamma_write,
         use_ssl_temp=config.hybrid_config.use_ssl_temp,
+        config=config.hybrid_config,
         dtype=tf.float32)
     return proto_plus_rnn
 
   elif config.memory_class in ['oml']:
     oml = get_module(
-        config.memory_class, 'oml', config.oml_config, dtype=tf.float32)
+        config.memory_class,
+        'oml',
+        config.oml_config,
+        learn_lr=kwargs.get("learn_lr", False),
+        weight_initializer=kwargs.get("weight_initializer", None),
+        learn_temp=kwargs.get("learn_temp", False),
+        cosine_bias=kwargs.get("cosine_bias", False),
+        dtype=tf.float32,
+        )
     return oml
 
   else:
@@ -299,7 +320,22 @@ def build_memory_module(config, backbone):
   return memory
 
 
-def build_net(config, backbone=None, memory=None, distributed=False):
+def build_fewshot_net(config, backbone=None):
+  """Builds a prototypical network for few-shot evaluation."""
+  if backbone is None:
+    backbone = build_backbone(config)
+  assert config.model_class in [
+      'proto_net', 'temp_proto_net', 'mask_proto_net', 'proto_net_var',
+      'classifier_net', 'classifier_l1_net', 'classifier_spatiall1_net',
+      'classifier_mlp_net', 'classifier_mask_dist_net',
+      'classifier_mask_dist_net_v2', 'matching_net', 'maml_net', 'maml_l1_net',
+      'imaml_net', 'tadam_net', 'proto_prod_net', 'mask_proto_net_solver',
+      'maml_last_net', 'tafe_net'
+  ]
+  fewshot_net = get_model(config.model_class, config, backbone)
+  return fewshot_net
+
+def build_net(config, backbone=None, memory=None, distributed=False, **kwargs):
   """Build a memory based lifelong learning model.
 
   Args:
@@ -310,7 +346,7 @@ def build_net(config, backbone=None, memory=None, distributed=False):
   if backbone is None:
     backbone = build_backbone(config)
   if memory is None:
-    memory = build_memory_module(config, backbone)
+    memory = build_memory_module(config, backbone, **kwargs)
   model = get_model(
       config.model_class, config, backbone, memory, distributed=distributed)
   return model

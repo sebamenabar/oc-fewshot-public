@@ -36,6 +36,8 @@ class OnlineProtoSigmoidNet(EpisodeRecurrentSigmoidNet):
               s=None,
               x_test=None,
               is_training=tf.constant(True),
+              backbone_is_training=None,
+              last_is_training=None,
               **kwargs):
     """Make a forward pass.
     Args:
@@ -48,7 +50,10 @@ class OnlineProtoSigmoidNet(EpisodeRecurrentSigmoidNet):
     """
     B = tf.constant(x.shape[0])
     T = tf.constant(x.shape[1])
-    h = self.run_backbone(x, is_training=is_training)
+    if backbone_is_training is None:
+      backbone_is_training = is_training
+    log.info(f"Backbone is training: {backbone_is_training}")
+    h = self.run_backbone(x, is_training=backbone_is_training, last_is_training=last_is_training)
     y_pred = tf.TensorArray(self.dtype, size=T)
     states = self.memory.get_initial_state(h.shape[0])
 

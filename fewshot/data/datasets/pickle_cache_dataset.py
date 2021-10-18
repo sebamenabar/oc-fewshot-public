@@ -26,10 +26,10 @@ class PickleCacheDataset(Dataset):
     assert split is not None
     self._folder = folder
     self._split = split
-    data = self.read_dataset()
-    self._images = data['images']
-    self._labels = data['labels']
-    self._label_str = data['label_str']
+    self._data = self.read_dataset()
+    self._images = self._data['images']
+    self._labels = self._data['labels']
+    self._label_str = self._data['label_str']
     self._cls_dict = None
 
   def __len__(self):
@@ -85,7 +85,8 @@ class PickleCacheDataset(Dataset):
 
   def get_size(self):
     """Gets the total number of images."""
-    return self.images.shape[0]
+    # return self.images.shape[0]
+    return len(self.images)
 
   def get_cls_dict(self):
     """Gets class dictionary."""

@@ -61,7 +61,7 @@ class OMLTruncSigmoidNet(EpisodeRecurrentSigmoidNet):
     y = tf.where(mask, -LOGINF, y)
     return y
 
-  def forward_partial(self, x, y, t_steps, *states, **kwargs):
+  def forward_partial(self, x, y, t_steps, *states, is_training, backbone_is_training=None, last_is_training=None, **kwargs):
     """Make a forward pass.
 
     Args:
@@ -74,7 +74,10 @@ class OMLTruncSigmoidNet(EpisodeRecurrentSigmoidNet):
       y_pred_test: [B, T']. Query example prediction, if exists.
     """
     B = tf.constant(x.shape[0])
-    x = self.run_backbone(x, is_training=kwargs['is_training'])
+    if backbone_is_training is None:
+      backbone_is_training = is_training
+    log.info(f"Backbone is training: {backbone_is_training}")
+    x = self.run_backbone(x, is_training=backbone_is_training, last_is_training=last_is_training)
     y_pred = tf.TensorArray(self.dtype, size=t_steps)
     # Maximum total number of classes.
     K = tf.constant(self.config.num_classes)
@@ -95,7 +98,7 @@ class OMLTruncSigmoidNet(EpisodeRecurrentSigmoidNet):
   def compute_loss(self, x, y, dt, y_gt, flag, *states, **kwargs):
     """Compute the training loss."""
     logits, states = self.forward_partial(
-        x, y, dt, *states, is_training=tf.constant(True))
+        x, y, dt, *states, is_training=tf.constant(True), **kwargs)
     logits_all = logits
     labels_all = y_gt
     K = self.config.num_classes

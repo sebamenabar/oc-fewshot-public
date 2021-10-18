@@ -20,11 +20,21 @@ log = get_logger()
 @RegisterModule("oml")
 class OML(ContainerModule):
 
-  def __init__(self, name, config, dtype=tf.float32):
+  def __init__(self,
+    name,
+    config,
+    learn_lr=False,
+    weight_initializer=None,
+    learn_temp=False,
+    cosine_bias=False,
+    dtype=tf.float32,
+  ):
     super(OML, self).__init__(dtype=dtype)
     self._name = name
     self._config = config
 
+    self.cosine_bias = cosine_bias
+    self.learn_temp = learn_temp
     self._oml_mlp = self.build_net()
     self._fast_weights = self._oml_mlp.weights()
     self._fast_weights_keys = [
@@ -36,6 +46,7 @@ class OML(ContainerModule):
     #   # learn initial bias values for the last layer.
     #   self._bias_init = self._get_variable(
     #       'bias_init', lambda: tf.zeros([1]) - 1.0, dtype=self.dtype)
+    self.weight_initializer = weight_initializer
     if config.learn_weight_init:
       self._weight_init = self.build_weight_init()
 
@@ -50,6 +61,18 @@ class OML(ContainerModule):
             "beta2", lambda: tf.zeros([1]) + 10.0, dtype=self.dtype)
         self._gamma2 = self._get_variable(
             "gamma2", lambda: tf.ones([1]), dtype=self.dtype)
+
+    self.learn_lr = learn_lr
+    if learn_lr:
+      self.lr = self._get_variable(
+        "lr", lambda: tf.ones([]) * self.config.inner_lr, dtype=self.dtype)
+
+    temp = 10.0
+    if self.config.cosine_classifier:
+      if learn_temp:
+        self._temp = self._get_variable("temp", lambda: tf.zeros([]) + temp)
+      else:
+        self._temp = temp
 
   def build_net(self, wdict=None):
     with variable_scope(self._name):
@@ -68,7 +91,9 @@ class OML(ContainerModule):
             "mlp",
             list(self.config.num_filters) + [K],
             # self.config.num_filters[0], K,
-            temp=10.0,
+            # temp=10.0,
+            learn_temp=False,
+            cosine_bias=self.cosine_bias,
             wdict=wdict)
       else:
         mlp = MLP(
@@ -91,7 +116,10 @@ class OML(ContainerModule):
     for i in range(len(states)):
       states_new.append(tf.TensorArray(self.dtype, size=B))
 
-    a = self.config.inner_lr
+    if self.learn_lr:
+      a = self.lr
+    else:
+      a = self.config.inner_lr
 
     # Run one step gradient descent for each examples in the mini-batch.
     for b in tf.range(B):
@@ -118,6 +146,8 @@ class OML(ContainerModule):
           wdict_ = dict(zip(self.fast_weights_keys, fast_weights))
           mlp_ = self.build_net(wdict=wdict_)
           out_ = mlp_(x_)
+          if self.config.cosine_classifier:
+            out_ *= self._temp
 
           if self.config.unknown_output_type == "softmax":
             if self.config.select_active_classes:
@@ -269,12 +299,12 @@ class OML(ContainerModule):
     """
     state_list = []
     varlist = self.fast_weights
-    log.info('varlist {}'.format(varlist))
+    # log.info('varlist {}'.format(varlist))
     L = len(varlist)
     shapelist = [[int(s) for s in v.shape] for v in varlist]
     fast_weights = [None] * L
     for i in range(L):
-      n = shapelist[i][-1]
+      # n = shapelist[i][-1]
       # fast_weights[i] = tf.zeros([bsize] + shapelist[i], dtype=self.dtype)
       key = self.fast_weights_keys[i]
 
@@ -285,9 +315,14 @@ class OML(ContainerModule):
           fast_weights[i] = tf.zeros([bsize] + shapelist[i], dtype=self.dtype)
           log.info('weights {} zero init'.format(key))
         else:
-          fast_weights[i] = tf.random.truncated_normal(
-              [bsize] + shapelist[i], mean=0.0, stddev=0.01)
-          log.info('weights {} normal init'.format(key))
+          if self.weight_initializer == "zeros":
+            fast_weights[i] = tf.zeros(
+                [bsize] + shapelist[i], dtype=self.dtype)
+            log.info('weights state {} zero init'.format(key))
+          else:
+            fast_weights[i] = tf.random.truncated_normal(
+                [bsize] + shapelist[i], mean=0.0, stddev=0.01)
+            log.info('weights {} normal init'.format(key))
     class_count = tf.zeros([bsize], dtype=tf.int64) - 1
     return (*fast_weights, class_count)
 
@@ -303,7 +338,7 @@ class OML(ContainerModule):
     """
     state_list = []
     varlist = self.fast_weights
-    log.info('varlist {}'.format(varlist))
+    # log.info('varlist {}'.format(varlist))
     L = len(varlist)
     shapelist = [[int(s) for s in v.shape] for v in varlist]
     fast_weights = [None] * L
@@ -322,9 +357,14 @@ class OML(ContainerModule):
           weight_init_list.append(b)
         else:
 
-          def winit():
-            return tf.random.truncated_normal(
-                shapelist[i], mean=0.0, stddev=0.01)
+          if self.weight_initializer == "zeros":
+            winit = lambda: tf.zeros(shapelist[i])
+            log.info('w0 init zero')
+          else:
+            def winit():
+              return tf.random.truncated_normal(
+                  shapelist[i], mean=0.0, stddev=0.01)
+            log.info('w0 init random')
 
           idx = i // 2 if self.config.classifier_bias else i
           w = self._get_variable(

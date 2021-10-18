@@ -48,6 +48,7 @@ class CPMSSL(ContainerModule):
                use_ssl=True,
                use_ssl_beta_gamma_write=True,
                use_ssl_temp=True,
+               config=None,
                dtype=tf.float32):
     super(CPMSSL, self).__init__(dtype=dtype)
     self._rnn_memory = rnn_memory

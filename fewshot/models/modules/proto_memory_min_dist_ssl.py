@@ -33,8 +33,12 @@ class SemiSupervisedMinDistProtoMemory(SemiSupervisedProtoMemory):
                use_ssl_beta_gamma_write=True,
                unknown_logits="radii",
                temp_init=10.0,
-               dtype=tf.float32):
-    super(SemiSupervisedMinDistProtoMemory, self).__init__(
+               dtype=tf.float32,
+               learn_w0=False,
+               learn_temp=False,
+               config=None,
+               ):
+    super().__init__(
         name,
         dim,
         max_classes=max_classes,
@@ -42,9 +46,13 @@ class SemiSupervisedMinDistProtoMemory(SemiSupervisedProtoMemory):
         unknown_id=unknown_id,
         similarity=similarity,
         temp_init=temp_init,
-        dtype=dtype)
+        dtype=dtype,
+        learn_w0=learn_w0,
+        config=config,
+        )
     self._radius_init = radius_init
     self._unknown_logits = unknown_logits
+    self.learn_temp = learn_temp
     log.info('Radius init {}'.format(radius_init))
     if radius_init_write is not None:
       self._radius_init_write = radius_init_write
@@ -74,9 +82,14 @@ class SemiSupervisedMinDistProtoMemory(SemiSupervisedProtoMemory):
                   is_training=tf.constant(True),
                   ssl_store=tf.constant(True),
                   **kwargs):
+    if self.learn_temp:
+      temp = self._temp
+      log.info(f"Learning temperature: {temp}")
+    else:
+      temp = None
     y_ = self.retrieve(
         x, storage, count, t, add_new=add_new,
-        is_training=is_training)  # [B, K]
+        is_training=is_training, temp=temp)  # [B, K]
 
     if self._use_ssl_beta_gamma_write:
       beta2 = self._beta2
@@ -93,7 +106,7 @@ class SemiSupervisedMinDistProtoMemory(SemiSupervisedProtoMemory):
         beta=beta2,
         gamma=gamma2,
         add_new=add_new,
-        is_training=is_training)  # [B, K]
+        is_training=is_training, temp=temp)  # [B, K]
 
     y_unk2 = tf.math.sigmoid(y2_[:, -1:])
     y_soft = tf.concat([tf.nn.softmax(y2_[:, :-1]) * (1.0 - y_unk2), y_unk2],
@@ -120,6 +133,8 @@ class SemiSupervisedMinDistProtoMemory(SemiSupervisedProtoMemory):
                add_new=tf.constant(True),
                is_training=tf.constant(True)):
     """See ProtoMemory for documentation."""
+    if self._normalize_feature:
+      x = self._normalize(x)
     x = tf.expand_dims(x, 1)  # [B, 1, D]
     prototypes = storage
     K = self.max_classes

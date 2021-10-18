@@ -37,7 +37,10 @@ class OMLNet(EpisodeRecurrentNet):
     y = tf.where(mask, -LOGINF, y)
     return y
 
-  def forward(self, x, y, s=None, x_test=None, is_training=tf.constant(True)):
+  def forward(self, x, y, s=None, x_test=None, is_training=tf.constant(True),
+    backbone_is_training=None,
+    last_is_training=None,
+  ):
     """Make a forward pass.
 
     Args:
@@ -50,7 +53,11 @@ class OMLNet(EpisodeRecurrentNet):
       y_pred: [B, T]. Support example prediction.
       y_pred_test: [B, T']. Query example prediction, if exists.
     """
-    x = self.run_backbone(x, is_training=is_training)
+    if backbone_is_training is None:
+      backbone_is_training = is_training
+    log.info(f"Backbone is training: {backbone_is_training}")
+    x = self.run_backbone(x, is_training=backbone_is_training, last_is_training=last_is_training)
+    # x = self.run_backbone(x, is_training=is_training)
     B = tf.constant(x.shape[0])
     T = tf.constant(x.shape[1])
     y_pred = tf.TensorArray(self.dtype, size=T)
@@ -111,7 +118,7 @@ class OMLSigmoidNet(EpisodeRecurrentSigmoidNet):
     y = tf.where(mask, -LOGINF, y)
     return y
 
-  def forward(self, x, y, s=None, x_test=None, is_training=tf.constant(True)):
+  def forward(self, x, y, s=None, x_test=None, is_training=tf.constant(True), **kwargs):
     """Make a forward pass.
 
     Args:
@@ -124,7 +131,7 @@ class OMLSigmoidNet(EpisodeRecurrentSigmoidNet):
       y_pred: [B, T]. Support example prediction.
       y_pred_test: [B, T']. Query example prediction, if exists.
     """
-    x = self.run_backbone(x, is_training=is_training)
+    x = self.run_backbone(x, is_training=is_training, **kwargs)
     B = tf.constant(x.shape[0])
     T = tf.constant(x.shape[1])
     y_pred = tf.TensorArray(self.dtype, size=T)

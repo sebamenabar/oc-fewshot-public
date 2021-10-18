@@ -67,7 +67,7 @@ class Net(ContainerModule):
     # np.savez(path, **wdict)
     pkl.dump(wdict, open(path, 'wb'))
 
-  def load(self, path, load_optimizer=False):
+  def load(self, path, load_optimizer=False, skip_fc=False, load_step=True):
     """Loads the weights."""
     print(path)
     log.info('Restore from {}'.format(path))
@@ -76,13 +76,19 @@ class Net(ContainerModule):
     loaddict = pkl.load(open(path, 'rb'))
     if '__optimizer__' in loaddict and load_optimizer:
       self._optimizer.set_weights(loaddict['__optimizer__'])
+    if load_step is False:
+      log.info("Not loading step")
+      del loaddict['step:0']
 
     if '__optimizer__' in loaddict:
       del loaddict['__optimizer__']
     for k in loaddict.keys():
       if k in wdict:
-        log.info('Loaded {} {}'.format(k, wdict[k].shape))
-        wdict[k].assign(loaddict[k])
+        if skip_fc and k == "fc/w:0" or k == "fc/b:0":
+          log.info(f"Skipped {k}")
+        else:
+          log.info('Loaded {} {}'.format(k, wdict[k].shape))
+          wdict[k].assign(loaddict[k])
       else:
         log.error('Variable {} not found in the current graph'.format(k))
 

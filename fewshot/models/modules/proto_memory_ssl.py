@@ -26,8 +26,13 @@ class SemiSupervisedProtoMemory(ProtoMemory):
                unknown_id=None,
                similarity="euclidean",
                temp_init=10.0,
-               dtype=tf.float32):
-    super(SemiSupervisedProtoMemory, self).__init__(
+               dtype=tf.float32,
+               learn_w0=False,
+               config=None,
+              #  learn_temp=False,
+               ):
+    # super(SemiSupervisedProtoMemory, self).__init__(
+    super().__init__(
         name,
         dim,
         max_classes=max_classes,
@@ -35,7 +40,11 @@ class SemiSupervisedProtoMemory(ProtoMemory):
         unknown_id=unknown_id,
         similarity=similarity,
         temp_init=temp_init,
-        dtype=dtype)
+        dtype=dtype,
+        learn_w0=learn_w0,
+        config=config,
+        # learn_temp=learn_temp,
+        )
     assert fix_unknown, 'Not supported'
 
   def forward_one(self,
@@ -63,11 +72,21 @@ class SemiSupervisedProtoMemory(ProtoMemory):
       count: Count. [B, K].
       y_soft: Soft label. [B, K].
     """
+    if self._normalize_feature:
+      x = self._normalize(x)
     # TODO modify y and try hard ID here.
     bidx = tf.range(y.shape[0], dtype=y.dtype)  # [B]
     idx = tf.stack([bidx, y], axis=1)  # [B, 2]
     curr_val = tf.gather_nd(storage, idx)  # [B, D]
     curr_cnt = tf.expand_dims(tf.gather_nd(count, idx), 1)  # [B, 1]
+
+    # print(storage)
+    # print(bidx)
+    # print(idx)
+    # print(curr_val)
+    # print(curr_cnt)
+    # print(x)
+
     new_val = (curr_val * curr_cnt + x) / (curr_cnt + 1.0)  # [B, D]
     update = new_val - curr_val
     # Do not increment for unknowns.

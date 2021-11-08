@@ -1,3 +1,9 @@
+results
+slurm
+data
+NetDissect-Lite
+nbs
+
 *_pb2.py
 *.swp
 # Byte-compiled / optimized / DLL files

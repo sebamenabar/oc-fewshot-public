@@ -24,6 +24,7 @@ class MinibatchIterator(object):
                roaming_rooms=False,
                jitter=False,
                lrflip=False,
+               alt_aug=False,
                seed=1):
     self._dataset = dataset
     self._preprocessor = preprocessor
@@ -33,6 +34,7 @@ class MinibatchIterator(object):
     self.roaming_rooms = roaming_rooms
     self._jitter = jitter
     self._lrflip = lrflip
+    self.alt_aug = alt_aug
     self._mutex = threading.Lock()
     assert batch_size > 0, 'Need a positive number for batch size'
     self._batch_size = batch_size
@@ -65,33 +67,45 @@ class MinibatchIterator(object):
         return
       assert idx is not None
       if self.roaming_rooms:
+        # xs, masks, bboxes, ys = self.dataset.get_images(idx.tolist(), with_label=True)
+        # xs, masks, bboxes, ys = [list(x) for x in zip(*[self.dataset.get(i) for i in idx])]
+        batch = self.dataset.get_images(idx.tolist(), with_label=True)
+        xs, masks, bboxes, ys = zip(*batch)
+        if self.alt_aug:
+          pass
         # x, mask, y, _ = self.dataset.get(idx[0])
-        xs, masks, ys, _ = [list(x) for x in zip(*[self.dataset.get(i) for i in idx])]
-        if self.jitter or self.lrflip:
-          for i, (_x, _m) in enumerate(zip(xs, masks)):
-            if self.jitter:
-              PY = 6
-              PX = 8
-              x_pad_ = np.pad(
-                  _x, [[PY, PY], [PX, PX], [0, 0]],
-                  mode='constant',
-                  constant_values=0)
-              x_att_pad_ = np.pad(
-                  _m, [[PY, PY], [PX, PX]],
-                  mode='constant',
-                  constant_values=0)
-              H = _x.shape[0]
-              W = _x.shape[1]
+        # xs, masks, ys, _ = [list(x) for x in zip(*[self.dataset.get(i) for i in idx])]
+        else:
+          if self.jitter or self.lrflip:
+            for i, (_x, _m) in enumerate(zip(xs, masks)):
+              if self.jitter:
+                PY = 6
+                PX = 8
+                x_pad_ = np.pad(
+                    _x, [[PY, PY], [PX, PX], [0, 0]],
+                    mode='constant',
+                    constant_values=0)
+                x_att_pad_ = np.pad(
+                    _m, [[PY, PY], [PX, PX]],
+                    mode='constant',
+                    constant_values=0)
+                H = _x.shape[0]
+                W = _x.shape[1]
 
-              # Jitter image and segmentation differently.
-              start_y = self._rnd.randint(0, PY * 2)
-              start_x = self._rnd.randint(0, PX * 2)
-              start_y2 = self._rnd.randint(max(0, start_y - 2), start_y + 2)
-              start_x2 = self._rnd.randint(max(0, start_x - 2), start_x + 2)
-              xs[i] = x_pad_[start_y:start_y + H, start_x:start_x + W]
-              masks[i] = x_att_pad_[start_y2:start_y2 +
-                                        H, start_x2:start_x2 + W]
-        out = {"x": tf.stack(xs), "mask": tf.expand_dims(tf.stack(masks), -1), "y": tf.stack(ys)}
+                # Jitter image and segmentation differently.
+                start_y = self._rnd.randint(0, PY * 2)
+                start_x = self._rnd.randint(0, PX * 2)
+                start_y2 = self._rnd.randint(max(0, start_y - 2), start_y + 2)
+                start_x2 = self._rnd.randint(max(0, start_x - 2), start_x + 2)
+                xs[i] = x_pad_[start_y:start_y + H, start_x:start_x + W]
+                masks[i] = x_att_pad_[start_y2:start_y2 +
+                                          H, start_x2:start_x2 + W]
+        out = {
+          "x": tf.stack(xs),
+          "mask": tf.expand_dims(tf.stack(masks), -1),
+          "y": tf.stack(ys),
+          "bbox": tf.stack(bboxes),
+        }
         # yield {"x": x, "mask": tf.expand_dims(mask, -1), "y": y}
         yield out
       else:
@@ -130,19 +144,34 @@ class MinibatchIterator(object):
   def get_dataset(self):
     """Gets TensorFlow Dataset object."""
     if self.roaming_rooms:
+      # if self.alt_aug:
       shape_dict = {
-          'x': tf.TensorShape([self.batch_size, 120, 160, 3]),
-          'mask': tf.TensorShape([self.batch_size, 120, 160, 1]),
-          'y': tf.TensorShape([None]),
-          # 'x': tf.TensorShape([120, 160, 3]),
-          # 'mask': tf.TensorShape([120, 160, 1]),
-          # 'y': tf.TensorShape([]),
+        'x': tf.TensorShape([self.batch_size, 120, 160, 3]),
+        'mask': tf.TensorShape([self.batch_size, 120, 160, 1]),
+        'y': tf.TensorShape([None]),
+        'bbox': tf.TensorShape([self.batch_size, 4])
+        # 'x': tf.TensorShape([120, 160, 3]),
       }
       dtype_dict = {
-          'x': tf.uint8,
-          'mask': tf.uint8,
-          'y': tf.int32,
+        'x': tf.uint8,
+        'mask': tf.uint8,
+        'y': tf.int32,
+        'bbox': tf.uint8,
       }
+      # else:
+      #   shape_dict = {
+      #       'x': tf.TensorShape([self.batch_size, 120, 160, 3]),
+      #       'mask': tf.TensorShape([self.batch_size, 120, 160, 1]),
+      #       'y': tf.TensorShape([None]),
+      #       # 'x': tf.TensorShape([120, 160, 3]),
+      #       # 'mask': tf.TensorShape([120, 160, 1]),
+      #       # 'y': tf.TensorShape([]),
+      #   }
+      #   dtype_dict = {
+      #       'x': tf.uint8,
+      #       'mask': tf.uint8,
+      #       'y': tf.int32,
+      #   }
     else:
       shape_dict = {
           # 'x': tf.TensorShape([None, None, None, None]),
@@ -165,15 +194,20 @@ class MinibatchIterator(object):
       # else:
       if self.roaming_rooms:
         # data = self.roaming_rooms_preprocess(data)
-        data["x"] = tf.concat(
-          [
-            self.preprocessor(data["x"]),
-            # data["x"],
-            # data["mask"]
-          tf.cast(data["mask"], tf.float32)
-          ],
-          axis=-1
-        )
+        x, mask = self.preprocessor((data['x'], data['mask'], data["bbox"]))
+        data['x'] = tf.concat([x, mask], axis=-1)
+        # if self.alt_aug:
+        #   data["x"] = 
+        # else:
+        #   data["x"] = tf.concat(
+        #     [
+        #       self.preprocessor(data["x"]),
+        #       # data["x"],
+        #       # data["mask"]
+        #     tf.cast(data["mask"], tf.float32)
+        #     ],
+        #     axis=-1
+        #   )
         pass
       else:
         data['x'] = self.preprocessor(data['x'])

@@ -26,7 +26,10 @@ class VariableManager():
       # fullname = self.get_prefix() + '_' + name
     else:
       fullname = name
+    # print("getting " + fullname)
     if "wdict" in kwargs and kwargs["wdict"] is not None:
+      # print(kwargs["wdict"])
+      # print(fullname, fullname in kwargs["wdict"])
       if fullname in kwargs["wdict"]:
         log.info('Shared using wdict: {}'.format(fullname))
         return kwargs["wdict"][fullname]
@@ -35,6 +38,7 @@ class VariableManager():
     if fullname in self.var_dict:
       return self.var_dict[fullname]
     else:
+      # print("creating new", fullname)
       var = tf.Variable(initializer(), name=fullname, **kwargs)
       self.var_dict[fullname] = var
       return var

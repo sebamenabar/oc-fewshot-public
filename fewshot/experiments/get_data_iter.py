@@ -13,7 +13,7 @@ from fewshot.data.iterators import EpisodeIterator
 from fewshot.data.iterators import MinibatchIterator
 from fewshot.data.iterators import SemiSupervisedEpisodeIterator
 from fewshot.data.iterators import SimEpisodeIterator
-from fewshot.data.preprocessors import DataAugmentationPreprocessor, DataAugmentationPreprocessor2
+from fewshot.data.preprocessors import DataAugmentationPreprocessor, DataAugmentationPreprocessor2, DataAugmentationPreprocessor3
 from fewshot.data.preprocessors import NCHWPreprocessor
 from fewshot.data.preprocessors import NormalizationPreprocessor
 from fewshot.data.preprocessors import SequentialPreprocessor
@@ -41,7 +41,10 @@ def get_dataiter(data,
                  mean=None,
                  std=None,
                  da_prep2=False,
+                 da_prep3=False,
                  min_object_covered=0.2,
+                 shuffle_test=False,
+                 cycle_test=False,
                  ):
   """Gets dataset iterator."""
   md = data['metadata']
@@ -53,20 +56,32 @@ def get_dataiter(data,
     seed = 0
   sampler_dict = {}
   sampler_dict['train'] = MinibatchSampler(seed, cycle=True, shuffle=True)
-  sampler_dict['val'] = MinibatchSampler(seed, cycle=False, shuffle=False)
-  sampler_dict['test'] = MinibatchSampler(seed, cycle=False, shuffle=False)
+  sampler_dict['val'] = MinibatchSampler(seed, cycle=cycle_test, shuffle=shuffle_test)
+  sampler_dict['test'] = MinibatchSampler(seed, cycle=cycle_test, shuffle=shuffle_test)
   if (mean is None) or (std is None):
     mean = md.mean_pix
     std = md.std_pix 
   norm_prep = NormalizationPreprocessor(
-      mean=np.array(mean), std=np.array(std))
+      mean=np.array(mean), std=np.array(std), da_prep3=da_prep3)
 
 
   val_prep_list = []
   train_prep_list = []
 
+  assert not (da_prep2 and da_prep3), "data_prep2 and data_prep3 cannot be used together"
+
   if da_prep2:
     DaPrep = lambda *args: DataAugmentationPreprocessor2(*args, min_object_covered=min_object_covered)
+  elif da_prep3:
+    DaPrep = lambda *args: DataAugmentationPreprocessor3(
+      random_crop=md.random_crop,
+      random_flip=md.random_flip,
+      random_color=md.random_color,
+      # random_rotate=md.random_rotate,
+     )
+    val_prep_list.append(DataAugmentationPreprocessor3(
+      False, False, False,
+    ))
   else:
     DaPrep = DataAugmentationPreprocessor
   da_prep = DaPrep(md.image_size, md.crop_size,
@@ -100,7 +115,7 @@ def get_dataiter(data,
   train_prep_list.append(norm_prep)
   val_prep_list.append(norm_prep)
 
-  if nchw:
+  if nchw and not roaming_rooms:
     nchw_prep = NCHWPreprocessor()
     train_prep_list.append(nchw_prep)
     val_prep_list.append(nchw_prep)
@@ -110,11 +125,15 @@ def get_dataiter(data,
   prep = {'train': train_prep, 'val': val_prep, 'test': val_prep}
 
   it_dict = {}
-  for k in ['train', 'val', 'test']:
+  for k, j in zip(
+    ['train', 'val', 'test'],
+    [data_aug, False, False]
+    ):
     cycle = k == 'train'
     it_dict[k] = MinibatchIterator(data[k], sampler_dict[k], batch_size,
                                    preprocessor=prep[k], contrastive=contrastive, roaming_rooms=roaming_rooms,
-                                   jitter=jitter,
+                                   jitter=j,
+                                   alt_aug=j and roaming_rooms and da_prep3,
                                    )
   return it_dict
 
@@ -395,7 +414,11 @@ def get_dataiter_sim(data,
                      prefetch=True,
                      distributed=False,
                      seed=0,
-                     normalize=True,):
+                     normalize=True,
+                     mean=None,
+                     std=None,
+                     da_prep3=False,
+                     ):
   """Gets few-shot episode iterator in simulated environment.
 
   Args:
@@ -428,9 +451,13 @@ def get_dataiter_sim(data,
     sampler_dict[k] = MinibatchSampler(s, cycle=cyc, shuffle=shuf)
 
   # Data preprocessors.
+  if (mean is None) or (std is None):
+    mean = md.mean_pix
+    std = md.std_pix 
+
   if normalize:
     norm_prep = NormalizationPreprocessor(
-        mean=np.array(md.mean_pix), std=np.array(md.std_pix))
+        mean=np.array(mean), std=np.array(std))
   else:
     norm_prep = NormalizationPreprocessor(mean=np.array([0]), std=np.array([1]))
 

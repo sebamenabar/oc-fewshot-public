@@ -147,7 +147,7 @@ def train(model,
   keep = True
   restart = False
   best_val = 0.0
-  results = {}
+  results = None
   while keep:
     keep = False
     start = model.step.numpy()
@@ -201,6 +201,7 @@ def train(model,
       # Evaluate.
       
       if is_chief and ((i + 1) % config.steps_per_val == 0 or i == 0):
+        results = {}
         for key, data_it_ in zip(['train', 'val', 'test'],
                                  [dataiter_traintest, dataiter_test, dataiter_test_test]):
           data_it_.reset()
@@ -221,7 +222,8 @@ def train(model,
         print()
 
       # Save.
-      r = results['val'][0]
+      if results is not None:
+        r = results['val'][0]
       if is_chief and ((i + 1) % config.steps_per_save == 0 or i == 0):
         model.save(os.path.join(ckpt_folder, 'weights-{}'.format(i + 1)))
 
@@ -260,14 +262,30 @@ def main():
   assert args.data is not None, 'You need to pass in episode config file path'
   assert args.env is not None, 'You need to pass in environ config file path'
   assert args.tag is not None, 'You need to specify a tag'
+  global log
 
-  log.info('Command line args {}'.format(args))
+
+  
   config = get_config(args.config, ExperimentConfig)
   data_config = get_config(args.data, EpisodeConfig)
   env_config = get_config(args.env, EnvironmentConfig)
+
+
+  save_folder = os.path.join(env_config.results, env_config.dataset, args.tag)
+  # Create save folder.
+  if not os.path.isdir(save_folder):
+    os.makedirs(save_folder)
+
+  if args.file_logger:
+    log = get_logger(os.path.join(save_folder, f"log.txt"))
+
+  log.info('Command line args {}'.format(args))
   log.info('Model: \n{}'.format(config))
   log.info('Data episode: \n{}'.format(data_config))
   log.info('Environment: \n{}'.format(env_config))
+  log.info('Number of classes {}'.format(data_config.nway))
+
+
   config.num_classes = data_config.nway  # Assign num classes.
   config.num_steps = data_config.maxlen
   config.memory_net_config.max_classes = data_config.nway
@@ -275,15 +293,10 @@ def main():
   config.memory_net_config.max_items = data_config.maxlen
   config.oml_config.num_classes = data_config.nway
   config.fix_unknown = data_config.fix_unknown  # Assign fix unknown ID.
-  log.info('Number of classes {}'.format(data_config.nway))
 
   if 'SLURM_JOB_ID' in os.environ:
     log.info('SLURM job ID: {}'.format(os.environ['SLURM_JOB_ID']))
 
-  # Create save folder.
-  save_folder = os.path.join(env_config.results, env_config.dataset, args.tag)
-  if not os.path.isdir(save_folder):
-    os.makedirs(save_folder)
 
   if not args.reeval:
     model = build_pretrain_net(config)
@@ -306,6 +319,14 @@ def main():
     #     mem_model.load(latest)  # Not loading optimizer weights here.
     #     reload_flag = latest
     #     restore_steps = int(reload_flag.split('-')[-1])
+    if args.resume:
+      latest = latest_file(ckpt_folder, 'weights-')
+      if latest is not None:
+        log.info('Checkpoint already exists. Loading from {}'.format(latest))
+        mem_model.load(latest)  # Not loading optimizer weights here.
+        reload_flag = latest
+        restore_steps = int(reload_flag.split('-')[-1])
+
 
     if not args.eval:
       save_config(config, save_folder)
@@ -364,11 +385,13 @@ def main():
     weights_fp = latest_file(args.pretrain, 'weights-')
     if weights_fp is None:
       weights_fp = args.pretrain
+    log.info(f"Loading pretrained weights {weights_fp}")
     model.load(weights_fp, skip_fc=True, load_optimizer=False)
     if config.freeze_backbone:
-      model.set_trainable(False)  # Freeze the network.
       log.info('Backbone network is now frozen')
+      model.set_trainable(False)  # Freeze the network.
     backbone_is_training = not config.freeze_backbone
+  log.info(f"Backbone is training: {backbone_is_training}")
   if not args.eval:
     with writer.as_default() if writer is not None else dummy_context_mgr(
     ) as gs:
@@ -406,7 +429,10 @@ def main():
       if latest is not None:
         mem_model.load(latest)
       else:
-        latest = latest_file(args.pretrain, 'weights-')
+        if args.pretrain is not None:
+          latest = latest_file(args.pretrain, 'weights-')
+        else:
+          latest = None
         if latest is not None:
           mem_model.load(latest)
         else:
@@ -460,6 +486,9 @@ if __name__ == '__main__':
   parser.add_argument('--use_dataset_stats', default=False, action="store_true")
   parser.add_argument('--min_object_covered', default=0.2, type=float)
   parser.add_argument('--load_memory_module', default=None)
+
+  parser.add_argument('--file_logger', default=False, action="store_true")
+  parser.add_argument('--resume', default=False, action="store_true")
   args = parser.parse_args()
   # tf.random.set_seed(1234)
   tf.random.set_seed(args.seed)

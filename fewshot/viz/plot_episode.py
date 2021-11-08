@@ -89,6 +89,9 @@ def plot_one_episode(episode,
     if img.shape[-1] == 1:
       img_i = img[0, i - 1, :, :, 0]
       img_i = 0.5 * (img_i + 1.0)
+    elif img.shape[-1] == 3:
+      img_i = img[0, i - 1, :, :, :]
+      img_i = 0.5 * (img_i + 1.0)
     elif img.shape[-1] == 4:
       img_i = img[0, i - 1, :, :, :]
       img_i[:, :, :3] = 0.5 * (img_i[:, :, :3] + 1.0)

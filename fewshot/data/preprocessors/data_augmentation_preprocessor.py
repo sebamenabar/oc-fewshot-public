@@ -30,9 +30,11 @@ def _crop_and_resize(img, crop_size, min_object_covered=0.2):
 # P = 8
 
 
-def _pad(img, P):
+def _pad(img, P, batched=True):
     # print("padding", P)
-    return tf.pad(img, [[0, 0], [P, P], [P, P], [0, 0]])
+    if batched:
+        return tf.pad(img, [[0, 0], [P, P], [P, P], [0, 0]])
+    return tf.pad(img, [[P, P], [P, P], [0, 0]])
 
 
 def _resize(img, crop_size):
@@ -243,3 +245,95 @@ class DataAugmentationPreprocessor(Preprocessor):
     @property
     def crop_size(self):
         return self._crop_size
+
+
+def single_crop_and_resize(x, mask, bbox):
+    cropped = distorted_bounding_box_crop(
+        tf.concat((x, mask), axis=-1),
+        bbox,
+        min_object_covered=0.2,
+        aspect_ratio_range=(3.0 / 4 * aspect_ratio, 4.0 / 3.0 * aspect_ratio),
+        area_range=(0.08, 1.0),
+        max_attempts=100,
+    )
+    
+    image = tf.image.resize([cropped[:, :, :3]], [height, width],
+                         method=tf.image.ResizeMethod.BICUBIC)[0]
+    mask = tf.image.resize([cropped[:, :, 3:]], [height, width],
+                         method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)[0]
+    
+    return image, mask
+
+def crop_and_resize(x, mask, bbox):
+    out = []
+    for _x, _m, _b in zip(x, mask, bbox[:, None]):
+        out.append(single_crop_and_resize(_x, _m, _b))
+        
+    return (
+        tf.clip_by_value(tf.stack([o[0] for o in out], axis=0), 0., 1.),
+        tf.clip_by_value(tf.stack([o[1] for o in out], axis=0), 0., 1.),
+    )
+
+class DataAugmentationPreprocessor3(Preprocessor):
+    def __init__(
+        self,
+        # image_size,
+        # crop_size,
+        random_crop,
+        random_flip,
+        random_color,
+        # random_rotate,
+        min_object_covered=0.2,
+    ):
+        # self._image_size = image_size
+        # self._crop_size = crop_size
+        self._random_crop = random_crop
+        self._random_flip = random_flip
+        self._random_color = random_color
+        # self._random_rotate = random_rotate
+        self.min_object_covered = min_object_covered
+
+    def preprocess(self, inputs):
+        return self.data_augment_batch(inputs)
+
+    # @tf.function
+    def data_augment_batch(self, inputs):
+        with tf.device("/cpu:0"):
+            x, mask, bbox = inputs
+
+            print(x)
+            print(mask)
+            print(bbox)
+
+
+            if self._random_crop:
+                P = 32
+
+                x = _pad(x, P)
+                mask = _pad(mask, P)
+                bbox = tf.gather(bbox[:, None], axis=2, indices=[0, 2, 1, 3])
+                bbox = bbox + tf.convert_to_tensor([P, P, P, P], dtype=tf.uint8)
+
+            x = x / 255
+            mask = tf.cast(mask, tf.float32)
+
+            if self._random_crop:
+                h, w = x.shape[1:3]
+                bbox = tf.cast(bbox, tf.float32) / tf.constant(
+                    [h, w, h, w], dtype=tf.float32
+                )
+
+                width = 160
+                height = 120
+                aspect_ratio = width / height
+
+                x, mask = crop_and_resize(x, mask, bbox)
+            
+            if self._random_color:
+                x = _color_jitter(x)
+                x = _clip(x)
+            if self._random_flip:
+                x = _flip(x)
+
+        # return tf.concat((x, mask), axis=-1)
+        return x, mask

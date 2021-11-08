@@ -43,6 +43,10 @@ class HierarchicalEpisodeSampler(EpisodeSampler):
     self._hierarchy_dict = None
     self._hierarchy_dict_keys = None
 
+  def reset(self):
+    super().reset()
+    self.subsampler.reset()
+
   def set_dataset(self, dataset):
     """Hook the sampler with a dataset object."""
     # super(HierarchicalEpisodeSampler, self).set_dataset(dataset)

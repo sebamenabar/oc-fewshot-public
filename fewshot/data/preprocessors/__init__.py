@@ -1,4 +1,8 @@
-from .data_augmentation_preprocessor import DataAugmentationPreprocessor, DataAugmentationPreprocessor2  # NOQA
+from .data_augmentation_preprocessor import (
+    DataAugmentationPreprocessor,
+    DataAugmentationPreprocessor2,
+    DataAugmentationPreprocessor3,
+)  # NOQA
 from .nchw_preprocessor import NCHWPreprocessor  # NOQA
 from .normalization_preprocessor import NormalizationPreprocessor  # NOQA
 from .sequential_preprocessor import SequentialPreprocessor  # NOQA

@@ -153,7 +153,7 @@ class SimEpisodeIterator(Iterator):
 
           # Skip black images.
           if np.sum(item['rgb']) == 0:
-            # log.info('Black out found')
+            log.info('Black out found')
             # assert False, 'Found black image'
             continue
 

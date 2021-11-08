@@ -29,6 +29,9 @@ class Blender(object):
     """Returns the blended class list and the hierarchical flag."""
     raise NotImplementedError
 
+    def reset(self):
+      pass
+
 
 @register_blender('hard')
 class HardBlender(Blender):
@@ -114,6 +117,10 @@ class MarkovSwitchBlender(Blender):
     self._base_dist = base_dist
     self._switch_prob = switch_prob
     self._rnd = np.random.RandomState(seed)
+    self._seed = seed
+
+  def reset(self):
+    self._rnd = np.random.RandomState(self._seed)
 
   def sample_random(self):
     """Randomly sample an integer from 0 to len(base_dist) - 1."""
